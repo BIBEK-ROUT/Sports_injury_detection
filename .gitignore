@@ -1,0 +1,76 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# FastAPI / Uvicorn
+*.log
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Database
+*.db
+*.sqlite3
+
+# ML Models & Large files
+*.h5
+*.pkl
+*.pt
+*.pth
+*.onnx
+models/weights/
+
+# Node / Frontend
+node_modules/
+.next/
+out/
+dist/
+build/
+.cache/
+*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Docker
+.docker/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Test
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# Alembic
+alembic/versions/*.pyc
+
+# Datasets (large files)
+datasets/raw/
+datasets/processed/
+
+# Uploads
+backend/uploads/
+backend/temp/
