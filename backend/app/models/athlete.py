@@ -1,9 +1,9 @@
 import uuid
 from datetime import datetime, date
 from sqlalchemy import Column, String, Integer, ForeignKey, DateTime, Date, Text, Numeric
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from app.core.database import Base
+from app.models.user import UUID  # Shared cross-database UUID type
 
 
 class AthleteProfile(Base):

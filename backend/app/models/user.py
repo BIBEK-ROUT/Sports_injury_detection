@@ -1,9 +1,24 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Boolean, Integer, ForeignKey, DateTime
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Column, String, Boolean, Integer, ForeignKey, DateTime, types
 from sqlalchemy.orm import relationship
 from app.core.database import Base
+
+
+# Cross-database compatible UUID type (works with both SQLite and PostgreSQL)
+class UUID(types.TypeDecorator):
+    impl = types.String(36)
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return None
+        return str(value)
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return None
+        return uuid.UUID(value)
 
 
 class Role(Base):

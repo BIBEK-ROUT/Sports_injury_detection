@@ -3,8 +3,10 @@ Seed script to populate the roles table with default roles.
 Run this once after starting the database:
     python seed_roles.py
 """
-from app.core.database import SessionLocal
+from app.core.database import SessionLocal, engine, Base
 from app.models.user import Role
+from app.models import athlete  # noqa: F401 — must import to register AthleteProfile relationship
+from app.models import user as user_models  # noqa: F401
 
 
 def seed_roles():
@@ -21,13 +23,13 @@ def seed_roles():
         existing = db.query(Role).filter(Role.name == role_data["name"]).first()
         if not existing:
             db.add(Role(**role_data))
-            print(f"✅ Added role: {role_data['name']}")
+            print(f"Added role: {role_data['name']}")
         else:
-            print(f"⏭️  Role already exists: {role_data['name']}")
+            print(f"Role already exists: {role_data['name']}")
 
     db.commit()
     db.close()
-    print("\n✅ Roles seeded successfully!")
+    print("\nRoles seeded successfully!")
 
 
 if __name__ == "__main__":
