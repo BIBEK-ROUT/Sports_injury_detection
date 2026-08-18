@@ -34,6 +34,8 @@ jobs:
 
       - name: Run Pytest Test Suite
         env:
+          DATABASE_URL: "sqlite:///./test_ci.db"
+          JWT_SECRET_KEY: "ci_test_jwt_secret_key_sportguard_12345"
           SECRET_KEY: "ci_cd_test_secret_key_sportguard_12345"
           ALGORITHM: "HS256"
           ACCESS_TOKEN_EXPIRE_MINUTES: "60"
