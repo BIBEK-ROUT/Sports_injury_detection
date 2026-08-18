@@ -1,0 +1,732 @@
+=== Slide 1 ===
+=== Slide 2 ===
+  [Shape 0]:
+    - Sports Injury Risk Detection from Video
+  [Shape 1]:
+  [Shape 2]:
+    - PROBLEM STATEMENT
+  [Shape 3]:
+    - Athletes can develop injuries due to abnormal movement patterns, poor posture, biomechanical issues, and training-related factors.                                                                                                         
+    - Manual movement analysis can be difficult and time-consuming                                                                                                                     
+  [Shape 4]:
+  [Shape 5]:
+    - PROJECT OBJECTIVE
+  [Shape 6]:
+  [Shape 7]:
+    - 01
+  [Shape 8]:
+    - Analyze athlete movement videos using computer vision and pose estimation.
+  [Shape 9]:
+  [Shape 10]:
+    - 02
+  [Shape 11]:
+    - Identify biomechanical issues and abnormal movement patterns that may indicate injury risk.
+  [Shape 12]:
+  [Shape 13]:
+    - 03
+  [Shape 14]:
+    - Generate injury-risk insights and corrective recommendations to support injury prevention.
+  [Shape 15]:
+    - Team Members
+  [Shape 16]:
+    - Manjeera  •  Payal  •  Mithra  •  Bibek •  Sonika •  Sumit
+  [Shape 17]:
+    - Mentor: Springboard Mentor
+=== Slide 3 ===
+  [Shape 0]:
+  [Shape 2]:
+    - Key Features
+  [Shape 6]:
+    - 01
+  [Shape 7]:
+    - 02
+  [Shape 8]:
+    - 03
+  [Shape 9]:
+    - 04
+  [Shape 10]:
+    - Ai Video Analysis
+  [Shape 11]:
+    - Biomechanical Assessment
+  [Shape 12]:
+    - Injury Risk Scoring
+  [Shape 13]:
+    - Recommendations and Reports
+=== Slide 4 ===
+  [Shape 0]:
+    - Workflow
+  [Shape 1]:
+    - End-to-end athlete video analysis pipeline
+  [Shape 2]:
+  [Shape 3]:
+  [Shape 4]:
+    - REGISTER / LOGIN
+  [Shape 5]:
+    - Create account & Sign In
+  [Shape 6]:
+  [Shape 7]:
+    - ATHLETE PROFILE
+  [Shape 8]:
+    - Sport • training • Injury history
+  [Shape 9]:
+  [Shape 10]:
+    - VIDEO UPLOAD
+  [Shape 11]:
+    - Movement  Video
+  [Shape 12]:
+  [Shape 13]:
+    - POSE ANALYSIS
+  [Shape 14]:
+    - MediaPipe Landmarks
+  [Shape 15]:
+  [Shape 16]:
+    - BIOMECHANICALANALYSIS
+  [Shape 17]:
+    - Angles • ROM • Trunk Lean • Valgus
+  [Shape 18]:
+    - →
+  [Shape 19]:
+    - →
+  [Shape 20]:
+    - →
+  [Shape 21]:
+    - →
+  [Shape 22]:
+    - ↓
+  [Shape 23]:
+  [Shape 24]:
+    - RISK SCORE
+  [Shape 25]:
+    - 0–100 risk assessment
+  [Shape 26]:
+  [Shape 27]:
+    - RECOMMENDATIONS
+  [Shape 28]:
+    - Posture • exercise • Recory
+  [Shape 29]:
+  [Shape 30]:
+    - REPORTS
+  [Shape 31]:
+    - • History • PDF • CSV Export
+  [Shape 32]:
+    - →
+  [Shape 33]:
+    - →
+  [Shape 34]:
+    - TECHNOLOGY / PROCESS FLOW
+  [Shape 35]:
+  [Shape 36]:
+    - React + TypeScript
+  [Shape 37]:
+  [Shape 38]:
+    - FastAPI
+  [Shape 39]:
+  [Shape 40]:
+    - MediaPipe Pose
+  [Shape 41]:
+  [Shape 42]:
+    - Risk Engine
+  [Shape 43]:
+  [Shape 44]:
+    - Reports
+  [Shape 45]:
+    - →
+  [Shape 46]:
+    - →
+  [Shape 47]:
+    - →
+  [Shape 48]:
+    - →
+  [Shape 49]:
+    - Video → Pose & Biomechanics → Risk → Recommendations → Reports
+  [Shape 55]:
+  [Shape 56]:
+=== Slide 5 ===
+  [Shape 0]:
+    - Backend & API
+  [Shape 1]:
+    - FastAPI-based backend for authentication, video processing and risk analysis
+  [Shape 2]:
+    - BACKEND STACK
+  [Shape 3]:
+  [Shape 4]:
+    - FastAPI
+  [Shape 5]:
+    - REST API framework
+  [Shape 6]:
+  [Shape 7]:
+    - PostgreSQL
+  [Shape 8]:
+    - Stores users, athlete profiles, videos and analysis results
+  [Shape 9]:
+  [Shape 10]:
+    - Authentication
+  [Shape 11]:
+    - Registration, login and protected API access
+  [Shape 12]:
+  [Shape 13]:
+    - Async Processing
+  [Shape 14]:
+    - Video analysis runs in the background
+  [Shape 15]:
+  [Shape 16]:
+    - REST APIs
+  [Shape 17]:
+    - Frontend communicates with backend through APIs
+  [Shape 18]:
+    - SYSTEM ARCHITECTURE
+  [Shape 19]:
+  [Shape 20]:
+    - React + TypeScript
+  [Shape 21]:
+    - Frontend
+  [Shape 22]:
+    - ↓
+  [Shape 23]:
+  [Shape 24]:
+    - FastAPI
+  [Shape 25]:
+    - Backend API layer
+  [Shape 26]:
+  [Shape 27]:
+    - Auth
+  [Shape 28]:
+    - Register / Login
+  [Shape 29]:
+  [Shape 30]:
+    - Video Upload
+  [Shape 31]:
+    - Async processing
+  [Shape 32]:
+  [Shape 33]:
+    - Risk APIs
+  [Shape 34]:
+    - Assessment & history
+  [Shape 35]:
+    - ↓
+  [Shape 36]:
+    - ↘
+  [Shape 37]:
+    - ↓
+  [Shape 38]:
+    - ↙
+  [Shape 39]:
+  [Shape 40]:
+    - PostgreSQL
+  [Shape 41]:
+    - Application database
+  [Shape 42]:
+  [Shape 43]:
+    - KEY API FLOW
+  [Shape 44]:
+  [Shape 45]:
+    - POST /register
+  [Shape 46]:
+    - →
+  [Shape 47]:
+  [Shape 48]:
+    - POST /login
+  [Shape 49]:
+    - →
+  [Shape 50]:
+  [Shape 51]:
+    - POST /videos/upload
+  [Shape 52]:
+    - →
+  [Shape 53]:
+  [Shape 54]:
+    - GET /videos/{id}
+  [Shape 55]:
+    - →
+  [Shape 56]:
+  [Shape 57]:
+    - GET /athletes/me/risk-history
+  [Shape 58]:
+    - Frontend → REST API → FastAPI → Auth / Video Processing / Risk APIs → PostgreSQL
+=== Slide 6 ===
+  [Shape 0]:
+    - API Integration
+    - Frontend communicates with FastAPI through APIs..
+  [Shape 1]:
+    - TypeScript
+    - Adds structure and type safety to the frontend code.
+  [Shape 2]:
+    - 01 . Registration & Login
+    - Secure account creation and user login.
+  [Shape 3]:
+    - Frontend & User Interface
+  [Shape 4]:
+    - Main User Features 
+  [Shape 5]:
+    - Technology
+  [Shape 6]:
+    - React
+    - Builds the interactive user interface and application pages.
+  [Shape 7]:
+    - 03 . Dashboard 
+    - Latest analysis, risk score and activity information..
+  [Shape 8]:
+    - 02 . Athlete Profile
+    - Sport, position, training load and injury history.
+  [Shape 9]:
+    - 04 . Video Upload & Analysis
+    - Uploads movement videos for pose and biomechanical analysis.
+  [Shape 10]:
+    - 05 . Reports History 
+    - Previous analyses, risk results, recommendations and reports.
+  [Shape 11]:
+    - React  + TypeScript frontend connected to the FastAPI backend
+  [Shape 13]:
+    - User Workflow
+=== Slide 7 ===
+  [Shape 0]:
+  [Shape 1]:
+    -     Registration  Page  
+=== Slide 8 ===
+  [Shape 1]:
+    - User Registration
+    - Responsive Design
+  [Shape 2]:
+    - Features
+=== Slide 9 ===
+  [Shape 0]:
+    - Login  Page     
+  [Shape 2]:
+=== Slide 10 ===
+  [Shape 0]:
+    - Features
+  [Shape 1]:
+    - Email and password-based login.
+    - User-Friendly Input Fields
+  [Shape 2]:
+=== Slide 11 ===
+  [Shape 0]:
+  [Shape 2]:
+    -      Let’s Explore    
+    -         Dashboard      
+=== Slide 12 ===
+=== Slide 13 ===
+=== Slide 14 ===
+=== Slide 15 ===
+=== Slide 16 ===
+=== Slide 17 ===
+=== Slide 18 ===
+=== Slide 19 ===
+  [Shape 0]:
+    - Pose Estimation & Biomechanical Analysis
+  [Shape 1]:
+    - POSE ESTIMATION
+  [Shape 2]:
+  [Shape 3]:
+    - MediaPipe Pose
+  [Shape 4]:
+    - • Detects athlete body landmarks from video frames.
+  [Shape 5]:
+    - • Provides 33 pose landmarks.
+  [Shape 6]:
+    - • Maps required points to a 17-point COCO-style representation.
+  [Shape 7]:
+    - • Tracks shoulder, elbow, hip, knee, ankle and other body points.
+  [Shape 8]:
+    - Key tracked points
+  [Shape 9]:
+  [Shape 10]:
+    - Shoulder
+  [Shape 11]:
+  [Shape 12]:
+    - Elbow
+  [Shape 13]:
+  [Shape 14]:
+    - Hip
+  [Shape 15]:
+  [Shape 16]:
+    - Knee
+  [Shape 17]:
+  [Shape 18]:
+    - Ankle
+  [Shape 19]:
+  [Shape 20]:
+    - Foot
+  [Shape 21]:
+    - BIOMECHANICAL ANALYSIS
+  [Shape 22]:
+  [Shape 23]:
+    - 01 · Joint Angles
+  [Shape 24]:
+    - Measures angles at joints such as the knee and elbow.
+  [Shape 25]:
+  [Shape 26]:
+    - 02 · Knee Valgus Proxy
+  [Shape 27]:
+    - 2D estimate of inward/outward knee alignment; directional, not clinical.
+  [Shape 28]:
+  [Shape 29]:
+    - 03 · ROM Difference
+  [Shape 30]:
+    - Compares left and right knee range of motion across the clip.
+  [Shape 31]:
+  [Shape 32]:
+    - 04 · Trunk Lean
+  [Shape 33]:
+    - Measures upper-body lean during movement.
+  [Shape 34]:
+    - ANALYSIS FLOW
+  [Shape 35]:
+  [Shape 36]:
+    - Video
+  [Shape 37]:
+    - →
+  [Shape 38]:
+  [Shape 39]:
+    - Frames
+  [Shape 40]:
+    - →
+  [Shape 41]:
+  [Shape 42]:
+    - MediaPipe Pose
+  [Shape 43]:
+    - →
+  [Shape 44]:
+  [Shape 45]:
+    - Body Landmarks
+  [Shape 46]:
+    - →
+  [Shape 47]:
+  [Shape 48]:
+    - Joint & Movement Metrics
+  [Shape 49]:
+    - →
+  [Shape 50]:
+  [Shape 51]:
+    - Biomechanical Analysis
+  [Shape 52]:
+    - Note: knee valgus is a 2D single-camera proxy and is less reiable for side-on running footage.
+=== Slide 20 ===
+  [Shape 0]:
+    - Annotated athlete video / skeleton overlay
+=== Slide 21 ===
+  [Shape 0]:
+    - Risk Scoring + Recommendations + Testing
+  [Shape 1]:
+    - RISK SCORING
+  [Shape 2]:
+  [Shape 3]:
+    - Rule-Based Scoring Engine
+  [Shape 4]:
+    - Current implementation is explainable and transparent. It is not a newly trained injury classifier.
+  [Shape 5]:
+  [Shape 6]:
+    - Score Range
+  [Shape 7]:
+    - 0–100
+  [Shape 8]:
+  [Shape 9]:
+    - Output
+  [Shape 10]:
+    - Risk Level
+  [Shape 11]:
+    - RISK LEVELS
+  [Shape 12]:
+  [Shape 13]:
+    - Low
+  [Shape 14]:
+  [Shape 15]:
+    - Moderate
+  [Shape 16]:
+  [Shape 17]:
+    - High
+  [Shape 18]:
+  [Shape 19]:
+    - Critical
+  [Shape 20]:
+    - SCORING FACTORS
+  [Shape 21]:
+  [Shape 22]:
+    - Knee valgus proxy
+  [Shape 23]:
+  [Shape 24]:
+    - Knee ROM asymmetry
+  [Shape 25]:
+  [Shape 26]:
+    - Trunk lean
+  [Shape 27]:
+  [Shape 28]:
+    - Training load
+  [Shape 29]:
+  [Shape 30]:
+    - Injury history
+  [Shape 31]:
+    - RECOMMENDATIONS
+  [Shape 32]:
+  [Shape 33]:
+    - Posture Correction
+  [Shape 34]:
+    - Movement cues based on identified biomechanical factors.
+  [Shape 35]:
+  [Shape 36]:
+    - Exercise Plan
+  [Shape 37]:
+    - Targeted exercise suggestions related to movement limitations.
+  [Shape 38]:
+  [Shape 39]:
+    - Recovery Plan
+  [Shape 40]:
+    - Recovery and training-load guidance based on risk factors.
+  [Shape 41]:
+  [Shape 42]:
+    - Biomechanics → Risk Factors → Score → Recommendations
+  [Shape 43]:
+    - TESTING
+  [Shape 44]:
+  [Shape 45]:
+    - Injury-Risk Engine Tests
+  [Shape 46]:
+    - Score, thresholds, factors and recommendations.
+  [Shape 47]:
+  [Shape 48]:
+    - Upload-Flow Tests
+  [Shape 49]:
+    - End-to-end video upload and analysis flow.
+  [Shape 50]:
+  [Shape 51]:
+    - Biomechanics Regression
+  [Shape 52]:
+    - Checks biomechanical calculations remain stable.
+  [Shape 53]:
+  [Shape 54]:
+    - Risk-History Tests
+  [Shape 55]:
+    - Validates risk history aggregation across videos.
+  [Shape 56]:
+  [Shape 57]:
+    - WHY RULE-BASED?
+  [Shape 58]:
+    - No labeled real-world injury-outcome dataset was available for reliable classifier training.
+=== Slide 22 ===
+  [Shape 0]:
+    - Reports & Deployment
+  [Shape 1]:
+    - 01 · REPORTS & HISTORY
+  [Shape 2]:
+  [Shape 3]:
+    - Reports History
+  [Shape 4]:
+    - • Stores previous video analysis results.
+  [Shape 5]:
+    - • Displays injury type, risk score and risk level.
+  [Shape 6]:
+    - • Downloads an individual PDF report.
+  [Shape 7]:
+    - • Exports complete history as CSV.
+  [Shape 8]:
+  [Shape 9]:
+    - PDF
+  [Shape 10]:
+    - Individual assessment report
+  [Shape 11]:
+  [Shape 12]:
+    - CSV
+  [Shape 13]:
+    - Complete report history export
+  [Shape 14]:
+    - 02 · REPORT GENERATION
+  [Shape 15]:
+  [Shape 16]:
+    - Generated Report Includes
+  [Shape 17]:
+  [Shape 18]:
+    - Athlete information
+  [Shape 19]:
+  [Shape 20]:
+    - Video name & assessment date
+  [Shape 21]:
+  [Shape 22]:
+    - Risk score & risk level
+  [Shape 23]:
+  [Shape 24]:
+    - Contributing biomechanical factors
+  [Shape 25]:
+  [Shape 26]:
+    - Recommendations
+  [Shape 27]:
+  [Shape 28]:
+    - Safety disclaimer
+  [Shape 29]:
+  [Shape 30]:
+    - Analysis → Risk Result → Report
+  [Shape 31]:
+    - 03 · DEPLOYMENT PLAN
+  [Shape 32]:
+  [Shape 33]:
+    - Docker
+  [Shape 34]:
+    - Containerize the application.
+  [Shape 35]:
+  [Shape 36]:
+    - Cloud Platform
+  [Shape 37]:
+    - Deploy frontend and backend using a platform such as Render.
+  [Shape 38]:
+  [Shape 39]:
+    - Configuration
+  [Shape 40]:
+    - Set environment variables and database connection.
+  [Shape 41]:
+  [Shape 42]:
+    - Post-Deployment Testing
+  [Shape 43]:
+    - Validate the complete application after deployment.
+  [Shape 44]:
+    - END-TO-END DELIVERY FLOW
+  [Shape 45]:
+  [Shape 46]:
+    - Analysis
+  [Shape 47]:
+    - →
+  [Shape 48]:
+  [Shape 49]:
+    - Risk Result
+  [Shape 50]:
+    - →
+  [Shape 51]:
+  [Shape 52]:
+    - Reports
+  [Shape 53]:
+    - →
+  [Shape 54]:
+  [Shape 55]:
+    - PDF / CSV
+  [Shape 56]:
+    - →
+  [Shape 57]:
+  [Shape 58]:
+    - Docker
+  [Shape 59]:
+    - →
+  [Shape 60]:
+  [Shape 61]:
+    - Cloud Deployment
+  [Shape 62]:
+=== Slide 23 ===
+  [Shape 0]:
+    - Results, Limitations & Future Scope
+  [Shape 1]:
+    - CURRENT RESULTS
+  [Shape 2]:
+    - LIMITATIONS
+  [Shape 3]:
+    - FUTURE SCOPE
+  [Shape 4]:
+  [Shape 5]:
+  [Shape 6]:
+    - ✓
+  [Shape 7]:
+    - Secure registration & login
+  [Shape 8]:
+  [Shape 9]:
+  [Shape 10]:
+    - ✓
+  [Shape 11]:
+    - Athlete profile management
+  [Shape 12]:
+  [Shape 13]:
+  [Shape 14]:
+    - ✓
+  [Shape 15]:
+    - Video upload & async processing
+  [Shape 16]:
+  [Shape 17]:
+  [Shape 18]:
+    - ✓
+  [Shape 19]:
+    - Pose & biomechanical analysis
+  [Shape 20]:
+  [Shape 21]:
+  [Shape 22]:
+    - ✓
+  [Shape 23]:
+    - Injury risk score generation
+  [Shape 24]:
+  [Shape 25]:
+  [Shape 26]:
+    - ✓
+  [Shape 27]:
+    - Personalized recommendations
+  [Shape 28]:
+  [Shape 29]:
+  [Shape 30]:
+    - ✓
+  [Shape 31]:
+    - Reports & export
+  [Shape 32]:
+  [Shape 33]:
+    - Single-athlete scope
+  [Shape 34]:
+    - Current workflow is designed around one athlete per analysis.
+  [Shape 35]:
+  [Shape 36]:
+    - 2D knee-valgus proxy
+  [Shape 37]:
+    - Accuracy depends on camera angle and is less reliable for side-on running footage.
+  [Shape 38]:
+  [Shape 39]:
+    - Rule-based risk engine
+  [Shape 40]:
+    - Current risk scoring is explainable rather than a trained injury classifier.
+  [Shape 41]:
+  [Shape 42]:
+    - Not a clinical diagnosis
+  [Shape 43]:
+    - Results are intended as automated screening and risk indication.
+  [Shape 44]:
+  [Shape 45]:
+    - →
+  [Shape 46]:
+    - Real labeled injury dataset
+  [Shape 47]:
+  [Shape 48]:
+    - →
+  [Shape 49]:
+    - Trained ML risk model
+  [Shape 50]:
+  [Shape 51]:
+    - →
+  [Shape 52]:
+    - Support more sports & movements
+  [Shape 53]:
+  [Shape 54]:
+    - →
+  [Shape 55]:
+    - Better camera-angle handling
+  [Shape 56]:
+  [Shape 57]:
+    - →
+  [Shape 58]:
+    - Docker + cloud production deployment
+  [Shape 59]:
+  [Shape 60]:
+    - PROJECT TAKEAWAY
+  [Shape 61]:
+    - From athlete video to actionable injury-risk insights
+  [Shape 62]:
+    - Video  →  Analysis  →  Risk  →  Recommendations  →  Reports
+=== Slide 24 ===
+  [Shape 0]:
+    - Why You’ll Love Using 
+    - Our Website!
+  [Shape 1]:
+    - 🏃 Easy Athlete Profiling
+    - 🎥 Video-Based Movement Analysis
+    - 📊 Explainable Injury-Risk Insights
+    - 💡 Personalized Recommendations
+    - 📄 Reports & Progress History
+=== Slide 25 ===
+  [Shape 0]:
+  [Shape 1]:
+    - Conclusion
+  [Shape 2]:
+    - Our project provides an AI-powered platform for analyzing athlete movement from video.The system detects body movement, performs biomechanical analysis, and generates an injury risk score.It also provides personalized recommendations to help improve movement and reduce potential injury risks.The current system is designed as a working prototype with an explainable rule-based risk engine.In the future, we plan to use real labelled injury data, train an ML-based risk model, support more sports, and improve deployment.Overall, the project demonstrates an end-to-end approach to video-based sports injury risk assessment.
+=== Slide 26 ===
+  [Shape 0]:
+  [Shape 1]:
+    - Thank you very much!

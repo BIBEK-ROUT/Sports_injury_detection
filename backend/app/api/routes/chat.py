@@ -10,6 +10,8 @@ POST /api/chat/{session_id}
 
 import json
 import logging
+from datetime import date
+from collections import defaultdict
 
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
@@ -25,6 +27,25 @@ from app.ml.ai_service import generate_chat_response, generate_dashboard_chat_re
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/chat", tags=["AI Chat"])
+
+# ── In-memory daily chat quota tracker ────────────────────────────────────
+# Stores {user_id: {date: count}}. Resets automatically each new day.
+DAILY_CHAT_LIMIT = 20
+_chat_counts: dict = defaultdict(dict)  # {user_id: {date_str: count}}
+
+
+def _check_and_increment_chat_quota(user_id: str):
+    """Check daily chat limit. Raises 429 if exceeded, else increments counter."""
+    today = str(date.today())
+    user_counts = _chat_counts[user_id]
+    count = user_counts.get(today, 0)
+    if count >= DAILY_CHAT_LIMIT:
+        raise __import__("fastapi").HTTPException(
+            status_code=429,
+            detail=f"Daily chat limit reached ({count}/{DAILY_CHAT_LIMIT}). "
+                   f"Please try again tomorrow to ensure fair usage for all users."
+        )
+    _chat_counts[user_id][today] = count + 1
 
 
 class ChatRequest(BaseModel):
@@ -44,6 +65,9 @@ def chat_dashboard_ai(
     If coach/physio/scientist: Context is the team roster and risk levels.
     If athlete: Context is their own overall progress and history.
     """
+    # Daily chat quota check
+    _check_and_increment_chat_quota(str(current_user.id))
+
     role_name = current_user.role.name if current_user.role else "athlete"
     dashboard_context = {}
 
@@ -121,6 +145,9 @@ def chat_with_ai(
     The assistant's response is tailored to the requesting user's role.
     Nothing is saved to the database.
     """
+    # Daily chat quota check
+    _check_and_increment_chat_quota(str(current_user.id))
+
     # Fetch the session to build context
     analysis = (
         db.query(VideoAnalysis)

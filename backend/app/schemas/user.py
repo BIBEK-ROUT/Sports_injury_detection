@@ -58,3 +58,16 @@ class Token(BaseModel):
 class TokenData(BaseModel):
     """Decoded token payload."""
     user_id: Optional[str] = None
+
+
+# ─── Password Reset Schemas ────────────────────────────────────
+
+class ForgotPasswordRequest(BaseModel):
+    """Schema for forgot password email request."""
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    """Schema for updating password with a reset token."""
+    token: str
+    new_password: str

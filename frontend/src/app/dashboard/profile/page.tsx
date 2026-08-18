@@ -2,6 +2,7 @@
 import { useEffect, useState, FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { athleteApi, authApi, AthleteProfileInput, InjuryInput, removeToken } from "@/lib/api";
+import ConfirmModal from "@/components/ConfirmModal";
 
 // ─── Sports & Positions ───────────────────────────────────────────
 const SPORTS: { label: string; value: string }[] = [
@@ -140,6 +141,9 @@ export default function ProfilePage() {
   // Linking
   const [inviteCodeInput, setInviteCodeInput] = useState("");
   const [linking, setLinking] = useState(false);
+  const [unlinking, setUnlinking] = useState<string | null>(null);
+  const [linkedCoach, setLinkedCoach] = useState<{ id: string; first_name: string; last_name: string; email: string } | null>(null);
+  const [linkedPhysio, setLinkedPhysio] = useState<{ id: string; first_name: string; last_name: string; email: string } | null>(null);
   const [linkMsg, setLinkMsg] = useState({ type: "", text: "" });
 
   // ── Fetch user role on mount ──
@@ -151,7 +155,7 @@ export default function ProfilePage() {
   }, []);
 
   // ── Athlete-only data loading ──
-  useEffect(() => {
+  const fetchProfile = () => {
     if (role !== "athlete") return;
     athleteApi.getProfile()
       .then(d => {
@@ -165,14 +169,74 @@ export default function ProfilePage() {
           gender: (d.gender || "").toUpperCase() || "",
           dominant_limb: (d.dominant_limb || "RIGHT").toUpperCase(),
         });
+        setLinkedCoach(d.linked_coach ?? null);
+        setLinkedPhysio(d.linked_physio ?? null);
         setHasProfile(true);
       })
       .catch(() => setHasProfile(false))
       .finally(() => setLoading(false));
 
     athleteApi.getInjuries().then(setInjuries).catch(() => {});
+  };
+
+  useEffect(() => {
+    fetchProfile();
   }, [role]);
 
+  async function handleLink(e: FormEvent) {
+    e.preventDefault();
+    if (!inviteCodeInput.trim()) return;
+    setLinking(true);
+    setLinkMsg({ type: "", text: "" });
+    try {
+      const res = await athleteApi.linkProfessional(inviteCodeInput.trim());
+      setLinkMsg({ type: "success", text: res.message });
+      setInviteCodeInput("");
+      fetchProfile();
+    } catch (err: unknown) {
+      setLinkMsg({ type: "error", text: err instanceof Error ? err.message : "Failed to link professional." });
+    } finally {
+      setLinking(false);
+    }
+  }
+
+  const [modalConfig, setModalConfig] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    confirmText?: string;
+    onConfirm: () => void;
+  }>({
+    isOpen: false,
+    title: "",
+    message: "",
+    onConfirm: () => {},
+  });
+
+  function handleUnlink(type: "coach" | "physiotherapist") {
+    const title = type === "coach" ? "Coach" : "Physiotherapist";
+    setModalConfig({
+      isOpen: true,
+      title: `Unlink ${title}?`,
+      message: `Are you sure you want to disconnect from your ${title}? You can connect to another professional anytime using their invite code.`,
+      confirmText: "Unlink",
+      onConfirm: async () => {
+        setUnlinking(type);
+        setLinkMsg({ type: "", text: "" });
+        setModalConfig(prev => ({ ...prev, isOpen: false }));
+        try {
+          const res = await athleteApi.unlinkProfessional(type);
+          setLinkMsg({ type: "success", text: res.message });
+          if (type === "coach") setLinkedCoach(null);
+          if (type === "physiotherapist") setLinkedPhysio(null);
+        } catch (err: unknown) {
+          setLinkMsg({ type: "error", text: err instanceof Error ? err.message : "Failed to unlink." });
+        } finally {
+          setUnlinking(null);
+        }
+      }
+    });
+  }
 
   async function handleSave(e: FormEvent) {
     e.preventDefault();
@@ -202,33 +266,24 @@ export default function ProfilePage() {
     } finally { setAddingInjury(false); }
   }
 
-  async function handleLink(e: FormEvent) {
-    e.preventDefault();
-    if (!inviteCodeInput.trim()) return;
-    setLinking(true);
-    setLinkMsg({ type: "", text: "" });
-    try {
-      const res = await athleteApi.linkProfessional(inviteCodeInput.trim());
-      setLinkMsg({ type: "success", text: res.message });
-      setInviteCodeInput("");
-    } catch (err: unknown) {
-      setLinkMsg({ type: "error", text: err instanceof Error ? err.message : "Failed to link professional." });
-    } finally {
-      setLinking(false);
-    }
-  }
-
-  async function handleDeleteAccount() {
-    if (!confirm("Are you sure you want to completely delete your account? This will permanently remove your profile, all video analyses, and saved skeleton tracking data. This action cannot be undone.")) return;
-    
-    setMsg({ type: "", text: "" });
-    try {
-      await authApi.deleteAccount();
-      removeToken();
-      router.push("/login");
-    } catch (err: unknown) {
-      setMsg({ type: "error", text: err instanceof Error ? err.message : "Failed to delete account." });
-    }
+  function handleDeleteAccount() {
+    setModalConfig({
+      isOpen: true,
+      title: "Permanently Delete Account?",
+      message: "This will permanently remove your profile, all video analyses, and saved skeleton tracking data. This action cannot be undone.",
+      confirmText: "Delete Account",
+      onConfirm: async () => {
+        setModalConfig(prev => ({ ...prev, isOpen: false }));
+        setMsg({ type: "", text: "" });
+        try {
+          await authApi.deleteAccount();
+          removeToken();
+          router.push("/login");
+        } catch (err: unknown) {
+          setMsg({ type: "error", text: err instanceof Error ? err.message : "Failed to delete account." });
+        }
+      }
+    });
   }
 
   // Non-athlete roles: simple account settings page
@@ -423,10 +478,12 @@ export default function ProfilePage() {
         </form>
       </div>
 
-      {/* ── Link to Professional ── */}
+      {/* ── Connected Professionals & Linking ── */}
       <div className="sg-card" style={{ marginBottom: "24px" }}>
-        <h2 style={{ fontSize: "15px", fontWeight: 700, color: "#0f172a", marginBottom: "8px" }}>Link to Professional</h2>
-        <p style={{ color: "#64748b", fontSize: "13px", marginBottom: "16px" }}>Enter your Coach or Physiotherapist's invite code to share your video analysis data with them.</p>
+        <h2 style={{ fontSize: "15px", fontWeight: 700, color: "#0f172a", marginBottom: "6px" }}>Connected Professionals</h2>
+        <p style={{ color: "#64748b", fontSize: "13px", marginBottom: "16px" }}>
+          Manage your linked Coach and Physiotherapist or connect to a new professional via their invite code.
+        </p>
         
         {linkMsg.text && (
           <div className={`sg-alert ${linkMsg.type === "success" ? "sg-alert-success" : "sg-alert-error"}`} style={{ marginBottom: "14px" }}>
@@ -434,18 +491,73 @@ export default function ProfilePage() {
           </div>
         )}
 
+        {/* Current Linked Professionals */}
+        {(linkedCoach || linkedPhysio) && (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "18px" }}>
+            {linkedCoach && (
+              <div style={{ padding: "12px 14px", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "8px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <span style={{ fontSize: "10px", fontWeight: 700, textTransform: "uppercase", color: "#166534", letterSpacing: "0.05em" }}>Linked Coach</span>
+                  <p style={{ fontWeight: 700, fontSize: "14px", color: "#0f172a", margin: "2px 0 0" }}>{linkedCoach.first_name} {linkedCoach.last_name}</p>
+                  <p style={{ fontSize: "12px", color: "#64748b", margin: 0 }}>{linkedCoach.email}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleUnlink("coach")}
+                  disabled={unlinking === "coach"}
+                  style={{
+                    padding: "5px 10px", borderRadius: "6px",
+                    background: "#fee2e2", border: "1px solid #fca5a5",
+                    color: "#b91c1c", fontSize: "12px", fontWeight: 600,
+                    cursor: unlinking === "coach" ? "not-allowed" : "pointer",
+                    fontFamily: "inherit", transition: "all 0.15s",
+                  }}
+                >
+                  {unlinking === "coach" ? "Unlinking..." : "Unlink"}
+                </button>
+              </div>
+            )}
+
+            {linkedPhysio && (
+              <div style={{ padding: "12px 14px", background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: "8px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <span style={{ fontSize: "10px", fontWeight: 700, textTransform: "uppercase", color: "#1e40af", letterSpacing: "0.05em" }}>Linked Physiotherapist</span>
+                  <p style={{ fontWeight: 700, fontSize: "14px", color: "#0f172a", margin: "2px 0 0" }}>{linkedPhysio.first_name} {linkedPhysio.last_name}</p>
+                  <p style={{ fontSize: "12px", color: "#64748b", margin: 0 }}>{linkedPhysio.email}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleUnlink("physiotherapist")}
+                  disabled={unlinking === "physiotherapist"}
+                  style={{
+                    padding: "5px 10px", borderRadius: "6px",
+                    background: "#fee2e2", border: "1px solid #fca5a5",
+                    color: "#b91c1c", fontSize: "12px", fontWeight: 600,
+                    cursor: unlinking === "physiotherapist" ? "not-allowed" : "pointer",
+                    fontFamily: "inherit", transition: "all 0.15s",
+                  }}
+                >
+                  {unlinking === "physiotherapist" ? "Unlinking..." : "Unlink"}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Connect new professional form */}
+        <p style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "8px" }}>Connect to Coach or Physio via Invite Code:</p>
         <form onSubmit={handleLink} style={{ display: "flex", gap: "12px" }}>
           <input 
             type="text" 
             className="sg-input" 
-            placeholder="e.g. C-8B39F" 
+            placeholder="e.g. 8A3F9B" 
             value={inviteCodeInput} 
             onChange={e => setInviteCodeInput(e.target.value.toUpperCase())}
             style={{ maxWidth: "200px", textTransform: "uppercase" }}
             required
           />
           <button type="submit" className="sg-btn sg-btn-primary" disabled={linking || !hasProfile} style={{ padding: "8px 16px", fontSize: "13px" }}>
-            {linking ? "Linking..." : "Connect"}
+            {linking ? "Connecting..." : "Connect"}
           </button>
         </form>
         {!hasProfile && <p style={{ color: "#ef4444", fontSize: "12px", marginTop: "8px" }}>Please create your profile first.</p>}
@@ -584,6 +696,14 @@ export default function ProfilePage() {
         </button>
       </div>
 
+      <ConfirmModal
+        isOpen={modalConfig.isOpen}
+        title={modalConfig.title}
+        message={modalConfig.message}
+        confirmText={modalConfig.confirmText}
+        onConfirm={modalConfig.onConfirm}
+        onCancel={() => setModalConfig(prev => ({ ...prev, isOpen: false }))}
+      />
     </div>
   );
 }

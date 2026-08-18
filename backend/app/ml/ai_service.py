@@ -1,5 +1,5 @@
 """
-AI Service — Google Gemini integration for SportGuard.
+AI Service — Groq (Llama 3) integration for SportGuard.
 
 Two functions:
 1. generate_static_recommendation()  → Called automatically after video analysis.
@@ -15,69 +15,71 @@ import logging
 import time
 from typing import Optional
 
-from google import genai
-from google.genai import types
+from groq import Groq
 
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# ─── Initialise Gemini client ─────────────────────────────────────────────────
-_client: Optional[genai.Client] = None
+# ─── Model to use for all Groq calls ─────────────────────────────────────────
+# llama-3.3-70b-versatile: best quality on Groq free tier.
+# Free tier limits: 14,400 req/day, 30 req/min, 131,072 tokens/min.
+GROQ_MODEL = "llama-3.3-70b-versatile"
 
-def _get_client() -> Optional[genai.Client]:
+# ─── Initialise Groq client ───────────────────────────────────────────────────
+_client: Optional[Groq] = None
+
+def _get_client() -> Optional[Groq]:
     global _client
-    if _client is None and settings.GEMINI_API_KEY:
-        _client = genai.Client(api_key=settings.GEMINI_API_KEY)
+    if _client is None and settings.GROQ_API_KEY:
+        _client = Groq(api_key=settings.GROQ_API_KEY)
     return _client
 
 
-def _call_gemini_with_retry(client, model: str, prompt: str, temperature: float, max_retries: int = 2) -> str:
+def _call_groq(
+    client: Groq,
+    system_prompt: str,
+    user_prompt: str,
+    temperature: float,
+    max_retries: int = 2,
+    retry_delay: int = 20,
+) -> str:
     """
-    Calls Gemini with automatic retry on 429 rate limit errors.
-    Used for BACKGROUND tasks (video AI recs) where waiting is acceptable.
+    Core Groq call helper shared by all three functions.
+    Automatically retries on 429 rate-limit errors.
     Raises RuntimeError('RATE_LIMIT_EXHAUSTED') if all retries fail.
     """
-    delay = 25  # seconds to wait between retries (free tier retry delay is ~20s)
     for attempt in range(max_retries + 1):
         try:
-            response = client.models.generate_content(
-                model=model,
-                contents=prompt,
-                config=types.GenerateContentConfig(temperature=temperature),
+            completion = client.chat.completions.create(
+                model=GROQ_MODEL,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user",   "content": user_prompt},
+                ],
+                temperature=temperature,
             )
-            return response.text.strip()
+            # Record token metrics
+            if hasattr(completion, "usage") and completion.usage:
+                from app.core.ai_tracker import record_ai_usage
+                record_ai_usage(
+                    prompt_tokens=getattr(completion.usage, "prompt_tokens", 0) or 0,
+                    completion_tokens=getattr(completion.usage, "completion_tokens", 0) or 0,
+                    total_tokens=getattr(completion.usage, "total_tokens", 0) or 0,
+                )
+            return completion.choices[0].message.content.strip()
         except Exception as e:
             err_str = str(e)
-            if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+            if "429" in err_str or "rate_limit" in err_str.lower() or "rate limit" in err_str.lower():
                 if attempt < max_retries:
-                    logger.warning(f"Gemini rate limited (429). Retrying in {delay}s (attempt {attempt + 1}/{max_retries})...")
-                    time.sleep(delay)
+                    logger.warning(
+                        f"Groq rate limited (429). Retrying in {retry_delay}s "
+                        f"(attempt {attempt + 1}/{max_retries})..."
+                    )
+                    time.sleep(retry_delay)
                     continue
-                else:
-                    raise RuntimeError("RATE_LIMIT_EXHAUSTED") from e
+                raise RuntimeError("RATE_LIMIT_EXHAUSTED") from e
             raise  # re-raise non-rate-limit errors immediately
-
-
-def _call_gemini_fast(client, model: str, prompt: str, temperature: float) -> str:
-    """
-    Calls Gemini ONCE with NO retry — used for live chat endpoints.
-    Fails immediately on rate limit so the HTTP response stays fast (< 5s).
-    Raises RuntimeError('RATE_LIMIT_EXHAUSTED') if quota is hit.
-    """
-    try:
-        response = client.models.generate_content(
-            model=model,
-            contents=prompt,
-            config=types.GenerateContentConfig(temperature=temperature),
-        )
-        return response.text.strip()
-    except Exception as e:
-        err_str = str(e)
-        if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
-            raise RuntimeError("RATE_LIMIT_EXHAUSTED") from e
-        raise
-
 
 
 # ─── Role-based system prompts ───────────────────────────────────────────────
@@ -85,69 +87,81 @@ ROLE_SYSTEM_PROMPTS = {
     "athlete": (
         "You are a friendly, encouraging personal sports coach AI.\n"
         "You are speaking directly with an athlete. They are NOT a medical professional.\n"
-        "ALWAYS structure your response with clear sections using these exact headings:\n"
-        "## How You're Looking\n"
-        "## Your Exercises\n"
-        "## Rest & Recovery\n"
-        "Rules:\n"
-        "- Use simple, everyday language. No medical jargon.\n"
-        "- Keep each section short — 2-4 bullet points max.\n"
-        "- Be encouraging and motivating.\n"
-        "- If asked for more detail on something, expand on that section only.\n"
-        "- NEVER give a wall of text. Always use the above sections.\n"
+        "\n"
+        "IMPORTANT — Context awareness rules:\n"
+        "1. If the user asks a sports, injury, training, or recovery question, respond using these structured headings:\n"
+        "   ## How You're Looking\n"
+        "   ## Your Exercises\n"
+        "   ## Rest & Recovery\n"
+        "   Keep each section to 2-4 bullet points. Use simple, everyday language. No medical jargon.\n"
+        "2. If the user asks something UNRELATED to sports or injury (e.g. asking you to create images,\n"
+        "   generate files, browse the web, write code, etc.), respond NATURALLY in 1-2 plain sentences.\n"
+        "   Do NOT use any section headings for these off-topic replies.\n"
+        "   Clearly and politely state what you can and cannot do. Example: 'I can't create images — I'm a text-only assistant focused on your training and injury data.'\n"
+        "3. If the user asks a casual greeting or general question, reply conversationally without headings.\n"
+        "4. Be encouraging and motivating in tone at all times.\n"
     ),
     "coach": (
         "You are an expert sports performance AI assistant for professional coaches.\n"
         "You are speaking with a coach who manages athlete training load and team selection.\n"
-        "ALWAYS structure your response with clear sections using these exact headings:\n"
-        "## Player Status\n"
-        "## Training Guidance\n"
-        "## What to Avoid\n"
-        "## Suggested Activities\n"
-        "Rules:\n"
-        "- Use plain English — coaches understand sport but NOT medical statistics or probabilities.\n"
-        "- Player Status: One clear sentence. Is the player okay to train? Yes/No/With caution.\n"
-        "- Training Guidance: What workouts are safe? How hard? For how long?\n"
-        "- What to Avoid: Specific movements or drills to skip and why.\n"
-        "- Suggested Activities: 2-3 specific drills or exercises that are safe right now.\n"
-        "- Keep each section brief (2-4 bullets). Only expand when asked.\n"
-        "- Do NOT mention AI model confidence scores, probabilities, or raw angles.\n"
+        "\n"
+        "IMPORTANT — Context awareness rules:\n"
+        "1. If the user asks about a player's status, training load, injury risk, or team performance,\n"
+        "   respond using these structured headings:\n"
+        "   ## Player Status\n"
+        "   ## Training Guidance\n"
+        "   ## What to Avoid\n"
+        "   ## Suggested Activities\n"
+        "   - Player Status: One clear sentence. Is the player okay to train? Yes/No/With caution.\n"
+        "   - Training Guidance: What workouts are safe? How hard? For how long?\n"
+        "   - What to Avoid: Specific movements or drills to skip and why.\n"
+        "   - Suggested Activities: 2-3 specific drills or exercises that are safe right now.\n"
+        "   - Keep each section brief (2-4 bullets). Do NOT mention AI model scores, probabilities, or raw angles.\n"
+        "2. If the user asks something UNRELATED to sports, coaching, or injury (e.g. asking you to create\n"
+        "   images, generate files, browse the web, write code, etc.), respond NATURALLY in 1-2 plain sentences.\n"
+        "   Do NOT use any section headings for these off-topic replies.\n"
+        "   Clearly and politely state what you can and cannot do. Example: 'I can't generate images — I'm a text-only assistant built to help you manage your athletes and training plans.'\n"
+        "3. If the user asks a casual greeting or general question, reply conversationally without headings.\n"
     ),
     "physiotherapist": (
         "You are an AI clinical decision-support assistant for sports physiotherapists.\n"
         "You are speaking with a qualified physiotherapist who understands anatomy and rehabilitation.\n"
-        "ALWAYS structure your response with clear sections using these exact headings:\n"
-        "## Issues Detected\n"
-        "## Rehabilitation Protocol\n"
-        "## Mobility Targets\n"
-        "## Return-to-Sport Timeline\n"
-        "Rules:\n"
-        "- Use precise clinical terminology (e.g., valgus collapse, hip abduction deficit, ROM).\n"
-        "- Issues Detected: List specific biomechanical findings from the session data.\n"
-        "- Rehabilitation Protocol: Specific exercises with sets/reps if relevant.\n"
-        "- Mobility Targets: Range of motion goals and stretching priorities.\n"
-        "- Return-to-Sport Timeline: Conservative estimate with milestones.\n"
-        "- Keep answers focused; only expand into full detail when asked.\n"
-        "- Note if escalation to a physician is warranted.\n"
+        "\n"
+        "IMPORTANT — Context awareness rules:\n"
+        "1. If the user asks about clinical findings, rehabilitation, mobility, or return-to-sport,\n"
+        "   respond using these structured headings:\n"
+        "   ## Issues Detected\n"
+        "   ## Rehabilitation Protocol\n"
+        "   ## Mobility Targets\n"
+        "   ## Return-to-Sport Timeline\n"
+        "   Use precise clinical terminology. Keep answers focused; only expand when asked.\n"
+        "   Note if escalation to a physician is warranted.\n"
+        "2. If the user asks something UNRELATED to physiotherapy or athlete health (e.g. asking you to create\n"
+        "   images, generate files, browse the web, write code, etc.), respond NATURALLY in 1-2 plain sentences.\n"
+        "   Do NOT use any section headings for these off-topic replies.\n"
+        "   Clearly and politely state what you can and cannot do.\n"
+        "3. If the user asks a casual greeting or general question, reply conversationally without headings.\n"
     ),
     "scientist": (
         "You are an AI data science and biomechanics assistant for sports scientists.\n"
         "You are speaking with a sports scientist who analyses model performance and injury data.\n"
-        "ALWAYS structure your response with clear sections using these exact headings:\n"
-        "## Model Analysis\n"
-        "## Biomechanical Observations\n"
-        "## Risk Vector\n"
-        "## Recommendations\n"
-        "Rules:\n"
-        "- Use technical language freely (XGBoost, softmax probabilities, feature importance, ROM).\n"
-        "- Model Analysis: Discuss the XGBoost confidence and classification outcome.\n"
-        "- Biomechanical Observations: Key angle deviations and flag patterns.\n"
-        "- Risk Vector: What specific combination of flags drove the risk classification.\n"
-        "- Recommendations: Suggestions for further analysis or model improvement if relevant.\n"
-        "- Be analytical and precise; expand on request.\n"
+        "\n"
+        "IMPORTANT — Context awareness rules:\n"
+        "1. If the user asks about model results, biomechanics, risk factors, or data analysis,\n"
+        "   respond using these structured headings:\n"
+        "   ## Model Analysis\n"
+        "   ## Biomechanical Observations\n"
+        "   ## Risk Vector\n"
+        "   ## Recommendations\n"
+        "   Use technical language freely (XGBoost, softmax probabilities, feature importance, ROM).\n"
+        "   Be analytical and precise; expand on request.\n"
+        "2. If the user asks something UNRELATED to sports science or biomechanics (e.g. asking you to create\n"
+        "   images, generate files, browse the web, write code, etc.), respond NATURALLY in 1-2 plain sentences.\n"
+        "   Do NOT use any section headings for these off-topic replies.\n"
+        "   Clearly and politely state what you can and cannot do.\n"
+        "3. If the user asks a casual greeting or general question, reply conversationally without headings.\n"
     ),
 }
-
 
 
 # ─── Function 1: Static Recommendation (saved to DB) ─────────────────────────
@@ -167,11 +181,11 @@ def generate_static_recommendation(
         "mobility_suggestions": ["...", "..."],
         "recovery_planning": ["...", "..."]
     }
-    Or None if Gemini is unavailable.
+    Or None if Groq is unavailable.
     """
     client = _get_client()
     if not client:
-        logger.warning("Gemini client not initialized — GEMINI_API_KEY may be missing.")
+        logger.warning("Groq client not initialized — GROQ_API_KEY may be missing.")
         return None
 
     # Build a human-readable summary of the active risk flags
@@ -190,11 +204,9 @@ def generate_static_recommendation(
 
     flags_text = "\n".join(flag_descriptions) if flag_descriptions else "- No specific biomechanical flags detected"
 
-    prompt = f"""
-You are an expert sports physiotherapist AI. A video analysis has been completed for an athlete.
+    system_prompt = "You are an expert sports physiotherapist AI. Respond ONLY with valid JSON — no markdown, no explanation, no code fences."
 
-ANALYSIS RESULTS:
-Provide a structured, JSON-only corrective training plan taking this data into account.
+    user_prompt = f"""A video analysis has been completed for an athlete. Generate a structured corrective training plan.
 
 Athlete Details:
 - Sport: {sport_type.replace("_", " ").title()}
@@ -204,7 +216,7 @@ Athlete Details:
 Active Biomechanical Risk Flags:
 {flags_text}
 
-You MUST respond ONLY with a valid JSON object matching this exact schema. Do not include any explanation outside the JSON:
+Respond ONLY with this exact JSON schema:
 
 {{
   "exercise_recommendations": [
@@ -220,28 +232,26 @@ You MUST respond ONLY with a valid JSON object matching this exact schema. Do no
     "specific recovery step 1 (e.g. rest days, ice, load reduction)",
     "specific recovery step 2"
   ]
-}}
-"""
+}}"""
 
     try:
-        raw = _call_gemini_with_retry(client, "gemini-3.5-flash", prompt, temperature=0.4)
-        # Strip markdown code fences if Gemini wraps the JSON
+        raw = _call_groq(client, system_prompt, user_prompt, temperature=0.4)
+        # Strip markdown code fences if the model wraps the JSON
         if raw.startswith("```"):
             raw = raw.split("```")[1]
             if raw.startswith("json"):
                 raw = raw[4:]
-        logger.info(f"Raw Gemini output before parse: {repr(raw)}")
+        logger.info(f"Raw Groq output before parse: {repr(raw)}")
         return json.loads(raw.strip())
     except RuntimeError as e:
         if "RATE_LIMIT_EXHAUSTED" in str(e):
-            logger.warning("Gemini free-tier daily quota exhausted for static recommendations.")
+            logger.warning("Groq free-tier daily quota exhausted for static recommendations.")
         else:
-            logger.error(f"Gemini static recommendation failed: {e}")
+            logger.error(f"Groq static recommendation failed: {e}")
         return None
     except Exception as e:
-        logger.error(f"Gemini static recommendation failed: {e}")
+        logger.error(f"Groq static recommendation failed: {e}")
         return None
-
 
 
 # ─── Function 2: Ephemeral Chat Response (NOT saved to DB) ───────────────────
@@ -277,25 +287,24 @@ ATHLETE SESSION CONTEXT (use this as background knowledge — do NOT list it out
 - Knee Valgus Average: {session_context.get('knee_valgus', 'N/A')}°
 """
 
-    full_prompt = f"{system_prompt}\n\n{context_block}\n\nUser Question: {user_message}"
+    user_prompt = f"{context_block}\n\nUser Question: {user_message}"
 
     try:
-        return _call_gemini_fast(client, "gemini-3.5-flash", full_prompt, temperature=0.6)
+        return _call_groq(client, system_prompt, user_prompt, temperature=0.6, max_retries=0)
     except RuntimeError as e:
         if "RATE_LIMIT_EXHAUSTED" in str(e):
-            logger.warning("Gemini free-tier daily quota exhausted for chat.")
+            logger.warning("Groq free-tier daily quota exhausted for chat.")
             return (
                 "⚠️ **Sporty is temporarily resting!**\n\n"
                 "The AI assistant has hit its free-tier daily limit. "
                 "This resets automatically every 24 hours.\n\n"
-                "💡 *Tip: Add a new GEMINI_API_KEY in backend/.env to restore instantly.*"
+                "💡 *Tip: Add a new GROQ_API_KEY in backend/.env to restore instantly.*"
             )
-        logger.error(f"Gemini chat response failed: {e}")
+        logger.error(f"Groq chat response failed: {e}")
         return "Sorry, I encountered an error generating a response. Please try again."
     except Exception as e:
-        logger.error(f"Gemini chat response failed: {e}")
+        logger.error(f"Groq chat response failed: {e}")
         return "Sorry, I encountered an error generating a response. Please try again."
-
 
 
 # ─── Function 3: Global Dashboard Chat Response (NOT saved to DB) ────────────
@@ -332,23 +341,21 @@ ATHLETE OVERVIEW CONTEXT (use this as background knowledge — do NOT list it ou
 - Past Injuries: {', '.join(dashboard_context.get('injuries', [])) or 'None'}
 """
 
-    full_prompt = f"{system_prompt}\n\n{context_block}\n\nUser Question: {user_message}"
+    user_prompt = f"{context_block}\n\nUser Question: {user_message}"
 
     try:
-        return _call_gemini_fast(client, "gemini-3.5-flash", full_prompt, temperature=0.6)
+        return _call_groq(client, system_prompt, user_prompt, temperature=0.6, max_retries=0)
     except RuntimeError as e:
         if "RATE_LIMIT_EXHAUSTED" in str(e):
-            logger.warning("Gemini free-tier daily quota exhausted for dashboard chat.")
+            logger.warning("Groq free-tier daily quota exhausted for dashboard chat.")
             return (
                 "⚠️ **Sporty is temporarily resting!**\n\n"
                 "The AI assistant has hit its free-tier daily limit. "
                 "This resets automatically every 24 hours.\n\n"
-                "💡 *Tip: Add a new GEMINI_API_KEY in backend/.env to restore instantly.*"
+                "💡 *Tip: Add a new GROQ_API_KEY in backend/.env to restore instantly.*"
             )
-        logger.error(f"Gemini dashboard chat response failed: {e}")
+        logger.error(f"Groq dashboard chat response failed: {e}")
         return "Sorry, I encountered an error generating a response. Please try again."
     except Exception as e:
-        logger.error(f"Gemini dashboard chat response failed: {e}")
+        logger.error(f"Groq dashboard chat response failed: {e}")
         return "Sorry, I encountered an error generating a response. Please try again."
-
-

@@ -1,8 +1,10 @@
 "use client";
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { authApi, athleteApi, videoApi, getToken, AnalysisHistoryItem, AthleteListItem } from "@/lib/api";
 import GlobalChatbot from "@/components/GlobalChatbot";
+import ConfirmModal from "@/components/ConfirmModal";
 
 const RISK_CONFIG = {
   low:      { color: "#16a34a", bg: "#f0fdf4", border: "#bbf7d0", label: "Low Risk" },
@@ -14,10 +16,44 @@ const RISK_CONFIG = {
 interface User { first_name: string; last_name: string; role: { name: string }; }
 
 // Athlete-only overview
-function AthleteOverview({ user, loading, history, hasProfile }: {
+function AthleteOverview({ user, loading, history, hasProfile, onDelete }: {
   user: User | null; loading: boolean; history: AnalysisHistoryItem[]; hasProfile: boolean | null;
+  onDelete: (sessionId: string) => Promise<void>;
 }) {
   const [expandedSession, setExpandedSession] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [sessionToDelete, setSessionToDelete] = useState<{ id: string; name: string } | null>(null);
+  const [actionSessionId, setActionSessionId] = useState<string | null>(null);
+  const [actionType, setActionType] = useState<"preview" | "download" | null>(null);
+  const [pdfError, setPdfError] = useState("");
+
+  const handlePreviewPdf = async (sessionId: string) => {
+    setActionSessionId(sessionId);
+    setActionType("preview");
+    setPdfError("");
+    try {
+      await videoApi.previewReportPdf(sessionId);
+    } catch (err: unknown) {
+      setPdfError(err instanceof Error ? err.message : "Failed to load PDF preview");
+    } finally {
+      setActionSessionId(null);
+      setActionType(null);
+    }
+  };
+
+  const handleDownloadPdf = async (sessionId: string, filename?: string) => {
+    setActionSessionId(sessionId);
+    setActionType("download");
+    setPdfError("");
+    try {
+      await videoApi.downloadReportPdf(sessionId, filename?.split(".")[0]);
+    } catch (err: unknown) {
+      setPdfError(err instanceof Error ? err.message : "Failed to download PDF report");
+    } finally {
+      setActionSessionId(null);
+      setActionType(null);
+    }
+  };
 
   const totalVideos = history.length;
   const latestRisk  = history[0]?.risk_level ?? null;
@@ -61,12 +97,12 @@ function AthleteOverview({ user, loading, history, hasProfile }: {
         ))}
       </div>
 
-      {/* ── My AI Recommendations — expandable per-session plan ── */}
+      {/* ── My Analyses & Reports ── */}
       <div className="sg-card" style={{ marginBottom: "16px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
           <div>
-            <h2 style={{ fontSize: "14px", fontWeight: 700, color: "#0f172a", margin: 0 }}>📋 My AI Recommendations</h2>
-            <p style={{ fontSize: "12px", color: "#94a3b8", marginTop: "3px" }}>Click any session to view your personalised corrective plan</p>
+            <h2 style={{ fontSize: "14px", fontWeight: 700, color: "#0f172a", margin: 0 }}>📋 Session History & Clinical Reports</h2>
+            <p style={{ fontSize: "12px", color: "#94a3b8", marginTop: "3px" }}>Click any session to view AI recommendations, preview, or export the 2-page PDF report</p>
           </div>
           <Link href="/dashboard/analyze" style={{ fontSize: "12px", color: "#2563eb", textDecoration: "none", fontWeight: 600 }}>+ New Analysis</Link>
         </div>
@@ -74,7 +110,7 @@ function AthleteOverview({ user, loading, history, hasProfile }: {
           : history.length === 0 ? (
             <div style={{ textAlign: "center", padding: "24px 0" }}>
               <p style={{ fontSize: "14px", color: "#64748b", fontWeight: 500 }}>No analyses yet</p>
-              <p style={{ fontSize: "13px", color: "#94a3b8", marginBottom: "16px" }}>Upload a video to get your first AI corrective plan.</p>
+              <p style={{ fontSize: "13px", color: "#94a3b8", marginBottom: "16px" }}>Upload a video to get your first AI corrective plan and report.</p>
               <Link href="/dashboard/analyze" className="sg-btn sg-btn-primary" style={{ fontSize: "13px", padding: "8px 18px" }}>Analyse First Video</Link>
             </div>
           ) : history.map(h => {
@@ -82,8 +118,9 @@ function AthleteOverview({ user, loading, history, hasProfile }: {
             const date = h.created_at ? new Date(h.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "--";
             const isOpen = expandedSession === h.session_id;
             const plan = h.ai_recommendations;
+            const isActing = actionSessionId === h.session_id;
             return (
-              <div key={h.session_id} style={{ border: "1px solid", borderColor: isOpen ? "#ddd6fe" : "#f1f5f9", borderRadius: "10px", marginBottom: "8px", overflow: "hidden", transition: "all 0.2s" }}>
+              <div key={h.session_id} style={{ position: "relative", border: "1px solid", borderColor: isOpen ? "#ddd6fe" : "#f1f5f9", borderRadius: "10px", marginBottom: "8px", overflow: "hidden", transition: "all 0.2s" }}>
                 {/* Session row header */}
                 <button
                   onClick={() => setExpandedSession(isOpen ? null : h.session_id)}
@@ -92,15 +129,85 @@ function AthleteOverview({ user, loading, history, hasProfile }: {
                   <div style={{ width: "10px", height: "10px", borderRadius: "50%", flexShrink: 0, background: rc?.color ?? "#94a3b8" }} />
                   <div style={{ flex: 1, minWidth: 0, textAlign: "left" }}>
                     <p style={{ fontSize: "13px", fontWeight: 600, color: "#0f172a", margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{h.filename ?? "Untitled Session"}</p>
-                    <p style={{ fontSize: "11px", color: "#94a3b8", margin: 0 }}>{date}</p>
+                    <p style={{ fontSize: "11px", color: "#94a3b8", margin: 0 }}>{date} · {h.duration_seconds?.toFixed(1) ?? "--"}s</p>
                   </div>
                   <span style={{ fontSize: "11px", fontWeight: 700, padding: "3px 10px", borderRadius: "20px", background: rc?.bg ?? "#f1f5f9", color: rc?.color ?? "#64748b", flexShrink: 0 }}>{rc?.label ?? "--"}</span>
                   <span style={{ fontSize: "14px", color: "#94a3b8", flexShrink: 0, transform: isOpen ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}>▾</span>
                 </button>
+                {/* Delete button */}
+                <button
+                  title="Delete this analysis"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSessionToDelete({ id: h.session_id, name: h.filename ?? "this session" });
+                  }}
+                  disabled={deletingId === h.session_id}
+                  style={{
+                    position: "absolute", top: "10px", right: "44px",
+                    background: "none", border: "none", cursor: "pointer",
+                    color: deletingId === h.session_id ? "#d1d5db" : "#ef4444",
+                    padding: "4px", borderRadius: "4px", lineHeight: 1,
+                    opacity: 0.7, transition: "opacity 0.15s",
+                  }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/>
+                  </svg>
+                </button>
 
-                {/* Expanded AI Plan */}
+                {/* Expanded AI Plan & PDF Export Actions */}
                 {isOpen && (
                   <div style={{ padding: "16px", borderTop: "1px solid #f1f5f9", background: "#fff" }}>
+                    
+                    {/* PDF Quick Action Toolbar */}
+                    <div style={{
+                      display: "flex", alignItems: "center", justifyContent: "space-between",
+                      padding: "10px 14px", background: "#f8fafc", borderRadius: "8px",
+                      border: "1px solid #e2e8f0", marginBottom: "16px", flexWrap: "wrap", gap: "10px",
+                    }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                        <span style={{ fontSize: "15px" }}>📄</span>
+                        <div>
+                          <p style={{ fontSize: "12px", fontWeight: 700, color: "#1e293b", margin: 0 }}>2-Page Biomechanical Assessment Report</p>
+                          <p style={{ fontSize: "11px", color: "#64748b", margin: 0 }}>Instant clinical summary, symmetry graphs & AI plan</p>
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <button
+                          onClick={() => handlePreviewPdf(h.session_id)}
+                          disabled={isActing}
+                          style={{
+                            padding: "6px 12px", borderRadius: "6px",
+                            background: "#ffffff", border: "1px solid #cbd5e1",
+                            color: "#0f172a", fontSize: "12px", fontWeight: 600,
+                            cursor: isActing ? "not-allowed" : "pointer", fontFamily: "inherit",
+                            display: "flex", alignItems: "center", gap: "5px",
+                            transition: "all 0.15s",
+                          }}
+                          onMouseEnter={e => { if (!isActing) (e.currentTarget as HTMLElement).style.background = "#f1f5f9"; }}
+                          onMouseLeave={e => { if (!isActing) (e.currentTarget as HTMLElement).style.background = "#ffffff"; }}
+                        >
+                          👁️ {isActing && actionType === "preview" ? "Opening..." : "Preview Report"}
+                        </button>
+                        <button
+                          onClick={() => handleDownloadPdf(h.session_id, h.filename)}
+                          disabled={isActing}
+                          style={{
+                            padding: "6px 12px", borderRadius: "6px",
+                            background: "#2563eb", border: "none",
+                            color: "#ffffff", fontSize: "12px", fontWeight: 600,
+                            cursor: isActing ? "not-allowed" : "pointer", fontFamily: "inherit",
+                            display: "flex", alignItems: "center", gap: "5px",
+                            transition: "all 0.15s",
+                          }}
+                          onMouseEnter={e => { if (!isActing) (e.currentTarget as HTMLElement).style.background = "#1d4ed8"; }}
+                          onMouseLeave={e => { if (!isActing) (e.currentTarget as HTMLElement).style.background = "#2563eb"; }}
+                        >
+                          ⬇️ {isActing && actionType === "download" ? "Downloading..." : "Download PDF"}
+                        </button>
+                      </div>
+                    </div>
+
                     {!plan ? (
                       <div style={{ display: "flex", alignItems: "center", gap: "10px", color: "#7c3aed" }}>
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ animation: "spin 1s linear infinite", flexShrink: 0 }}>
@@ -161,6 +268,26 @@ function AthleteOverview({ user, loading, history, hasProfile }: {
           <Link href="/dashboard/profile" className="sg-btn sg-btn-ghost" style={{ fontSize: "13px", padding: "10px 12px", justifyContent: "flex-start", gap: "8px" }}>Update Profile</Link>
         </div>
       </div>
+
+      <ConfirmModal
+        isOpen={sessionToDelete !== null}
+        title="Permanently Delete Analysis?"
+        message={`Are you sure you want to permanently delete "${sessionToDelete?.name}"? All joint angle telemetry, risk classification, and annotated skeleton tracking data for this session will be permanently deleted.`}
+        confirmText="Delete Session"
+        loading={deletingId !== null}
+        onConfirm={async () => {
+          if (!sessionToDelete) return;
+          const targetId = sessionToDelete.id;
+          setDeletingId(targetId);
+          try {
+            await onDelete(targetId);
+          } finally {
+            setDeletingId(null);
+            setSessionToDelete(null);
+          }
+        }}
+        onCancel={() => setSessionToDelete(null)}
+      />
     </div>
   );
 }
@@ -242,6 +369,7 @@ function TeamOverview({ user, loading, athletes }: {
 }
 
 export default function DashboardPage() {
+  const router = useRouter();
   const [user, setUser]             = useState<User | null>(null);
   const [hasProfile, setHasProfile] = useState<boolean | null>(null);
   const [history, setHistory]       = useState<AnalysisHistoryItem[]>([]);
@@ -253,6 +381,11 @@ export default function DashboardPage() {
     authApi.getMe().then(u => {
       setUser(u);
       const role = u.role?.name ?? "athlete";
+      // ── Admin: redirect straight to the admin panel ──────────────
+      if (role === "admin") {
+        router.push("/dashboard/admin");
+        return;
+      }
       if (role === "athlete") {
         Promise.allSettled([
           athleteApi.getProfile().then(() => setHasProfile(true)).catch(() => setHasProfile(false)),
@@ -265,11 +398,16 @@ export default function DashboardPage() {
     }).catch(() => setLoading(false));
   }, []);
 
+  async function handleDelete(sessionId: string) {
+    await videoApi.deleteAnalysis(sessionId);
+    setHistory(prev => prev.filter(h => h.session_id !== sessionId));
+  }
+
   const role = user?.role?.name ?? "athlete";
   return (
     <>
       {role === "athlete" ? (
-        <AthleteOverview user={user} loading={loading} history={history} hasProfile={hasProfile} />
+        <AthleteOverview user={user} loading={loading} history={history} hasProfile={hasProfile} onDelete={handleDelete} />
       ) : (
         <TeamOverview user={user} loading={loading} athletes={athletes} />
       )}

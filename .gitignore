@@ -33,10 +33,12 @@ build/
 # Database
 *.db
 *.sqlite3
+database/*.json
 
 # ML Models & Large files
 *.h5
 *.pkl
+!backend/app/ml/models/*.pkl
 *.pt
 *.pth
 *.onnx

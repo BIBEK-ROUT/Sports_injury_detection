@@ -37,3 +37,23 @@ def decode_access_token(token: str) -> Optional[dict]:
         return payload
     except JWTError:
         return None
+
+
+def create_password_reset_token(email: str, password_hash: str) -> str:
+    """Create a signed 15-minute password reset token."""
+    expire = datetime.utcnow() + timedelta(minutes=15)
+    to_encode = {
+        "sub": email,
+        "exp": expire,
+        "pwh": password_hash[-10:]  # use last 10 chars of current hash to invalidate token once used
+    }
+    return jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=ALGORITHM)
+
+
+def decode_password_reset_token(token: str) -> Optional[dict]:
+    """Decode and validate a password reset token."""
+    try:
+        payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[ALGORITHM])
+        return payload
+    except JWTError:
+        return None

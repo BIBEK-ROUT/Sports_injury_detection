@@ -189,23 +189,26 @@ class PoseEngine:
     def _draw_skeleton(self, frame: np.ndarray, landmarks: list) -> None:
         """Draw skeleton connections and joint dots manually on the frame."""
         h, w = frame.shape[:2]
-        
-        # Minimum confidence thresholds
-        VIS_THRESHOLD = 0.6
-        PRESENCE_THRESHOLD = 0.6
 
-        # Convert normalized coords to pixel coords, only if visible AND on-screen
+        # Raised thresholds (was 0.6). MediaPipe often hallucinates upper-body
+        # landmarks when only the lower body is in frame. Higher thresholds
+        # suppress these ghost points.
+        VIS_THRESHOLD      = 0.75
+        PRESENCE_THRESHOLD = 0.75
+        # Inset margin: reject landmarks within 4% of the frame edge.
+        # Hallucinated landmarks are typically placed right at the border.
+        MARGIN = 0.04
+
         points = {}
         for i, lm in enumerate(landmarks):
-            vis = getattr(lm, "visibility", 1.0)
-            pres = getattr(lm, "presence", 1.0)
-            
-            # Must be confident it's visible, confident it's in the frame, and ACTUALLY in the frame bounds
+            vis  = getattr(lm, "visibility", 1.0)
+            pres = getattr(lm, "presence",   1.0)
             if vis > VIS_THRESHOLD and pres > PRESENCE_THRESHOLD:
-                if 0.0 <= lm.x <= 1.0 and 0.0 <= lm.y <= 1.0:
+                # Must be confidently inside the frame (not near/beyond the border)
+                if MARGIN <= lm.x <= (1.0 - MARGIN) and MARGIN <= lm.y <= (1.0 - MARGIN):
                     points[i] = (int(lm.x * w), int(lm.y * h))
 
-        # Draw connection lines
+        # Draw connection lines (only if BOTH endpoints are confirmed visible)
         for start_idx, end_idx in POSE_CONNECTIONS:
             if start_idx in points and end_idx in points:
                 cv2.line(frame, points[start_idx], points[end_idx], (0, 255, 0), 2)
@@ -218,17 +221,19 @@ class PoseEngine:
     def _extract_joints(self, landmarks: list) -> JointCoordinates:
         """Map MediaPipe landmarks into our clean JointCoordinates dataclass."""
         joints = JointCoordinates()
-        VIS_THRESHOLD = 0.6
-        PRESENCE_THRESHOLD = 0.6
+        # Match the higher thresholds used in _draw_skeleton.
+        # This ensures biomechanics calculations also ignore hallucinated landmarks.
+        VIS_THRESHOLD      = 0.75
+        PRESENCE_THRESHOLD = 0.75
+        MARGIN = 0.04  # reject landmarks within 4% of the frame edge
 
         for joint_name, idx in LANDMARK_MAP.items():
             lm = landmarks[idx]
-            vis = getattr(lm, "visibility", 1.0)
-            pres = getattr(lm, "presence", 1.0)
-            
-            # Only record if the AI is confident AND the joint is physically within the camera frame
+            vis  = getattr(lm, "visibility", 1.0)
+            pres = getattr(lm, "presence",   1.0)
+
             if vis > VIS_THRESHOLD and pres > PRESENCE_THRESHOLD:
-                if 0.0 <= lm.x <= 1.0 and 0.0 <= lm.y <= 1.0:
+                if MARGIN <= lm.x <= (1.0 - MARGIN) and MARGIN <= lm.y <= (1.0 - MARGIN):
                     setattr(joints, joint_name, (
                         round(lm.x, 4),
                         round(lm.y, 4),
