@@ -2,9 +2,9 @@ name: SportGuard CI/CD Pipeline
 
 on:
   push:
-    branches: [ main, master, Bibek-Rout ]
+    branches: [ main, master, Bibek-Rout, milestone_4, milestone_3 ]
   pull_request:
-    branches: [ main, master, Bibek-Rout ]
+    branches: [ main, master, Bibek-Rout, milestone_4 ]
 
 jobs:
   backend-tests:
