@@ -8,6 +8,7 @@ import {
 } from "recharts";
 import { videoApi, authApi, athleteApi, getToken, AnalysisHistoryItem, chatApi } from "@/lib/api";
 import GlobalChatbot from "@/components/GlobalChatbot";
+import ConfirmModal from "@/components/ConfirmModal";
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 const RISK_CONFIG = {
@@ -212,6 +213,50 @@ export default function AthleteDetailPage() {
   const [expandedSession, setExpandedSession] = useState<string | null>(null);
   const [injuries, setInjuries] = useState<any[]>([]);
   const [showTrend, setShowTrend] = useState(false);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
+  const [previewingPdf, setPreviewingPdf] = useState(false);
+  const [removingAthlete, setRemovingAthlete] = useState(false);
+  const [showRemoveModal, setShowRemoveModal] = useState(false);
+  const [actionError, setActionError] = useState("");
+
+  const handleConfirmRemove = async () => {
+    setRemovingAthlete(true);
+    setShowRemoveModal(false);
+    try {
+      await athleteApi.removeAthleteFromRoster(userId);
+      router.push("/dashboard/athletes");
+    } catch (err: unknown) {
+      setActionError(err instanceof Error ? err.message : "Failed to remove athlete from roster");
+      setRemovingAthlete(false);
+    }
+  };
+
+  const handlePreviewPdf = async (sessionId: string) => {
+    setPreviewingPdf(true);
+    setActionError("");
+    try {
+      await videoApi.previewReportPdf(sessionId);
+    } catch (err: unknown) {
+      setActionError(err instanceof Error ? err.message : "Failed to load PDF preview");
+    } finally {
+      setPreviewingPdf(false);
+    }
+  };
+
+  const handleDownloadPdf = async (sessionId: string) => {
+    setDownloadingPdf(true);
+    setActionError("");
+    try {
+      const athleteName = athleteInfo ? `${athleteInfo.first_name}_${athleteInfo.last_name}` : "Athlete";
+      await videoApi.downloadReportPdf(sessionId, athleteName);
+    } catch (err: unknown) {
+      setActionError(err instanceof Error ? err.message : "Failed to download PDF report");
+    } finally {
+      setDownloadingPdf(false);
+    }
+  };
+
+  const [accessDenied, setAccessDenied] = useState(false);
 
   useEffect(() => {
     if (!getToken()) { router.push("/login"); return; }
@@ -221,11 +266,22 @@ export default function AthleteDetailPage() {
       if (r === "athlete") { router.push("/dashboard"); return; }
       athleteApi.getAllAthletes().then(list => {
         const a = list.find(x => x.user_id === userId);
-        if (a) setAthleteInfo({ first_name: a.first_name, last_name: a.last_name, email: a.email, sport_type: a.sport_type });
+        if (a) {
+          setAthleteInfo({ first_name: a.first_name, last_name: a.last_name, email: a.email, sport_type: a.sport_type });
+        } else if (r === "coach" || r === "physiotherapist") {
+          // If athlete is not in this professional's active roster list, deny access
+          setAccessDenied(true);
+        }
       }).catch(() => {});
       videoApi.getAthleteHistory(userId)
         .then(h => { setHistory(h); if (h.length > 0) setExpandedSession(h[0].session_id); })
-        .catch(() => setHistory([]))
+        .catch(err => {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (msg.includes("linked") || msg.includes("Not authorised") || msg.includes("403") || msg.includes("Forbidden")) {
+            setAccessDenied(true);
+          }
+          setHistory([]);
+        })
         .finally(() => setLoading(false));
       athleteApi.getAthleteInjuries(userId)
         .then(setInjuries)
@@ -237,12 +293,36 @@ export default function AthleteDetailPage() {
   const rc = expanded?.risk_level ? RISK_CONFIG[expanded.risk_level as keyof typeof RISK_CONFIG] : null;
   const ts = expanded?.risk_level ? TRAINING_STATUS[expanded.risk_level] : null;
 
+  if (accessDenied) {
+    return (
+      <div style={{ maxWidth: "560px", margin: "60px auto", textAlign: "center" }}>
+        <div className="sg-card" style={{ padding: "40px 24px", borderTop: "4px solid #ef4444" }}>
+          <div style={{ fontSize: "40px", marginBottom: "12px" }}>🔒</div>
+          <h2 style={{ fontSize: "18px", fontWeight: 700, color: "#0f172a", marginBottom: "8px" }}>Access Restricted</h2>
+          <p style={{ color: "#64748b", fontSize: "14px", lineHeight: 1.5, marginBottom: "24px" }}>
+            You are no longer connected to this athlete. They may have disconnected their profile or removed you from their team.
+          </p>
+          <Link href="/dashboard/athletes" className="sg-btn sg-btn-primary" style={{ display: "inline-flex", padding: "9px 22px", fontSize: "13px", textDecoration: "none" }}>
+            &larr; Back to Athlete Roster
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div>
       {/* Back nav */}
       <Link href="/dashboard/athletes" style={{ fontSize: "13px", color: "#2563eb", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "4px", marginBottom: "20px" }}>
         &larr; Back to Athletes
       </Link>
+
+      {actionError && (
+        <div style={{ background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: "8px", padding: "10px 14px", color: "#b91c1c", fontSize: "13px", marginBottom: "16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span>⚠️ {actionError}</span>
+          <button onClick={() => setActionError("")} style={{ background: "none", border: "none", color: "#b91c1c", cursor: "pointer", fontWeight: 700 }}>&times;</button>
+        </div>
+      )}
 
       {/* Athlete header */}
       {athleteInfo && (
@@ -266,9 +346,32 @@ export default function AthleteDetailPage() {
                 </button>
               )}
             </div>
-            <span style={{ fontSize: "11px", fontWeight: 600, padding: "2px 10px", borderRadius: "20px", background: "#f1f5f9", color: "#64748b", textTransform: "capitalize" }}>
-              Viewing as {viewerRole}
-            </span>
+            <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+              <span style={{ fontSize: "11px", fontWeight: 600, padding: "2px 10px", borderRadius: "20px", background: "#f1f5f9", color: "#64748b", textTransform: "capitalize" }}>
+                Viewing as {viewerRole}
+              </span>
+              {(viewerRole === "coach" || viewerRole === "physiotherapist") && (
+                <button
+                  onClick={() => setShowRemoveModal(true)}
+                  disabled={removingAthlete}
+                  style={{
+                    fontSize: "11px",
+                    fontWeight: 600,
+                    padding: "2px 10px",
+                    borderRadius: "20px",
+                    border: "1px solid #fecaca",
+                    background: "#fff5f5",
+                    color: "#dc2626",
+                    cursor: removingAthlete ? "not-allowed" : "pointer",
+                    fontFamily: "inherit",
+                    transition: "all 0.15s",
+                  }}
+                  title="Remove this athlete from your linked roster"
+                >
+                  {removingAthlete ? "Removing..." : "✂️ Remove from Roster"}
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -345,7 +448,66 @@ export default function AthleteDetailPage() {
                         &nbsp;&bull;&nbsp;{expanded.pose_detection_rate}% pose
                       </p>
                     </div>
-                    {rc && <span style={{ fontSize: "13px", fontWeight: 700, padding: "6px 16px", borderRadius: "20px", background: rc.bg, color: rc.color }}>{rc.label}</span>}
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                      {rc && <span style={{ fontSize: "13px", fontWeight: 700, padding: "6px 16px", borderRadius: "20px", background: rc.bg, color: rc.color }}>{rc.label}</span>}
+                      
+                      <button
+                        onClick={() => handlePreviewPdf(expanded.session_id)}
+                        disabled={previewingPdf || downloadingPdf}
+                        style={{
+                          padding: "6px 12px",
+                          borderRadius: "8px",
+                          background: "#ffffff",
+                          border: "1px solid #e2e8f0",
+                          color: "#1e293b",
+                          fontWeight: 600,
+                          fontSize: "12px",
+                          cursor: (previewingPdf || downloadingPdf) ? "not-allowed" : "pointer",
+                          fontFamily: "inherit",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "5px",
+                          boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+                          transition: "all 0.15s",
+                          opacity: previewingPdf ? 0.7 : 1,
+                        }}
+                        onMouseEnter={e => { if (!previewingPdf && !downloadingPdf) (e.currentTarget as HTMLElement).style.background = "#f8fafc"; }}
+                        onMouseLeave={e => { if (!previewingPdf && !downloadingPdf) (e.currentTarget as HTMLElement).style.background = "#ffffff"; }}
+                      >
+                        👁️ {previewingPdf ? "Loading..." : "Preview"}
+                      </button>
+
+                      <button
+                        onClick={() => handleDownloadPdf(expanded.session_id)}
+                        disabled={downloadingPdf || previewingPdf}
+                        style={{
+                          padding: "6px 12px",
+                          borderRadius: "8px",
+                          background: "#2563eb",
+                          border: "none",
+                          color: "#ffffff",
+                          fontWeight: 600,
+                          fontSize: "12px",
+                          cursor: (downloadingPdf || previewingPdf) ? "not-allowed" : "pointer",
+                          fontFamily: "inherit",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "5px",
+                          boxShadow: "0 1px 2px rgba(37,99,235,0.2)",
+                          transition: "all 0.15s",
+                          opacity: downloadingPdf ? 0.7 : 1,
+                        }}
+                        onMouseEnter={e => { if (!downloadingPdf && !previewingPdf) (e.currentTarget as HTMLElement).style.background = "#1d4ed8"; }}
+                        onMouseLeave={e => { if (!downloadingPdf && !previewingPdf) (e.currentTarget as HTMLElement).style.background = "#2563eb"; }}
+                      >
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                          <polyline points="7 10 12 15 17 10"/>
+                          <line x1="12" y1="15" x2="12" y2="3"/>
+                        </svg>
+                        {downloadingPdf ? "Exporting..." : "Export PDF"}
+                      </button>
+                    </div>
                   </div>
 
                   {/* Movement Symmetry — all roles */}
@@ -574,6 +736,16 @@ export default function AthleteDetailPage() {
           sessionId={expanded.session_id} 
         />
       )}
+
+      <ConfirmModal
+        isOpen={showRemoveModal}
+        title="Remove Athlete from Roster?"
+        message={`Are you sure you want to remove ${athleteInfo?.first_name ?? "this athlete"} from your roster? You will no longer receive high-risk injury alerts or see their historical telemetry.`}
+        confirmText="Remove from Roster"
+        loading={removingAthlete}
+        onConfirm={handleConfirmRemove}
+        onCancel={() => setShowRemoveModal(false)}
+      />
     </div>
   );
 }

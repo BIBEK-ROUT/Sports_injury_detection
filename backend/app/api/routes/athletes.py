@@ -102,6 +102,17 @@ def get_my_profile(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Athlete profile not found. Please create one first.",
         )
+
+    # Attach professional user info if linked
+    if profile.linked_coach_id:
+        coach_user = db.query(User).filter(User.id == profile.linked_coach_id).first()
+        if coach_user:
+            profile.linked_coach = coach_user
+    if profile.linked_physio_id:
+        physio_user = db.query(User).filter(User.id == profile.linked_physio_id).first()
+        if physio_user:
+            profile.linked_physio = physio_user
+
     return profile
 
 
@@ -163,7 +174,7 @@ def update_profile(
     return profile
 
 
-# ─── Link Professional ─────────────────────────────────────────────
+# ─── Link Professional (Athlete -> Coach / Physio) ─────────────────
 
 @router.post("/link", response_model=dict)
 def link_professional(
@@ -184,15 +195,181 @@ def link_professional(
     if not professional:
         raise HTTPException(status_code=404, detail="Invalid invite code.")
 
+    role_title = professional.role.name.capitalize()
+    pro_name = f"{professional.first_name} {professional.last_name}"
+    athlete_name = f"{current_user.first_name} {current_user.last_name}"
+
     if professional.role.name == "coach":
+        if profile.linked_coach_id:
+            current_coach = db.query(User).filter(User.id == profile.linked_coach_id).first()
+            coach_name = f"Coach {current_coach.first_name} {current_coach.last_name}" if current_coach else "another coach"
+            raise HTTPException(
+                status_code=400,
+                detail=f"You are already linked to {coach_name}. Please unlink from your current coach first before connecting to a new one."
+            )
         profile.linked_coach_id = professional.id
     elif professional.role.name == "physiotherapist":
+        if profile.linked_physio_id:
+            current_physio = db.query(User).filter(User.id == profile.linked_physio_id).first()
+            physio_name = f"Physiotherapist {current_physio.first_name} {current_physio.last_name}" if current_physio else "another physiotherapist"
+            raise HTTPException(
+                status_code=400,
+                detail=f"You are already linked to {physio_name}. Please unlink from your current physiotherapist first before connecting to a new one."
+            )
         profile.linked_physio_id = professional.id
     else:
         raise HTTPException(status_code=400, detail="This code does not belong to a valid professional.")
 
     db.commit()
-    return {"status": "success", "message": f"Successfully linked to {professional.role.name.capitalize()} {professional.first_name} {professional.last_name}!"}
+
+    # Log user_linked audit event
+    from app.core.activity_logger import log_activity
+    log_activity(
+        event="user_linked",
+        user_name=athlete_name,
+        user_email=current_user.email,
+        user_role="athlete",
+        details=f"Athlete {athlete_name} linked to {role_title} {pro_name} ({professional.email})",
+    )
+
+    return {"status": "success", "message": f"Successfully linked to {role_title} {pro_name}!"}
+
+
+# ─── Unlink Professional (Athlete self-removal) ────────────────────
+
+@router.post("/unlink", response_model=dict)
+def unlink_professional_self(
+    request: dict,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Allows an athlete to unlink themselves from their coach or physiotherapist."""
+    if current_user.role.name != "athlete":
+        raise HTTPException(status_code=403, detail="Only athletes can use this endpoint.")
+
+    profile = db.query(AthleteProfile).filter(AthleteProfile.user_id == str(current_user.id)).first()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Athlete profile not found.")
+
+    pro_type = (request.get("professional_type") or "").strip().lower()
+    athlete_name = f"{current_user.first_name} {current_user.last_name}"
+    unlinked_from = ""
+
+    from app.models.notification import Notification
+
+    if pro_type in ["coach", "linked_coach"]:
+        if profile.linked_coach_id:
+            coach = db.query(User).filter(User.id == profile.linked_coach_id).first()
+            unlinked_from = f"Coach {coach.first_name} {coach.last_name}" if coach else "Coach"
+            # Purge previous pending notifications from this athlete to this coach
+            db.query(Notification).filter(
+                Notification.recipient_id == profile.linked_coach_id,
+                Notification.athlete_id == current_user.id
+            ).delete()
+            # Send disconnection notification to coach
+            coach_notif = Notification(
+                recipient_id=profile.linked_coach_id,
+                athlete_id=current_user.id,
+                athlete_name=athlete_name,
+                session_id=None,
+                risk_level="unlinked",
+                sport_type=profile.sport_type,
+                message=f"Athlete {athlete_name} has unlinked from your coaching roster.",
+            )
+            db.add(coach_notif)
+            profile.linked_coach_id = None
+    elif pro_type in ["physiotherapist", "physio", "linked_physio"]:
+        if profile.linked_physio_id:
+            physio = db.query(User).filter(User.id == profile.linked_physio_id).first()
+            unlinked_from = f"Physiotherapist {physio.first_name} {physio.last_name}" if physio else "Physiotherapist"
+            # Purge previous pending notifications from this athlete to this physio
+            db.query(Notification).filter(
+                Notification.recipient_id == profile.linked_physio_id,
+                Notification.athlete_id == current_user.id
+            ).delete()
+            # Send disconnection notification to physiotherapist
+            physio_notif = Notification(
+                recipient_id=profile.linked_physio_id,
+                athlete_id=current_user.id,
+                athlete_name=athlete_name,
+                session_id=None,
+                risk_level="unlinked",
+                sport_type=profile.sport_type,
+                message=f"Athlete {athlete_name} has unlinked from your physiotherapy roster.",
+            )
+            db.add(physio_notif)
+            profile.linked_physio_id = None
+    else:
+        raise HTTPException(status_code=400, detail="Invalid professional type. Specify 'coach' or 'physiotherapist'.")
+
+    db.commit()
+
+    # Log user_unlinked audit event
+    from app.core.activity_logger import log_activity
+    log_activity(
+        event="user_unlinked",
+        user_name=athlete_name,
+        user_email=current_user.email,
+        user_role="athlete",
+        details=f"Athlete {athlete_name} disconnected from {unlinked_from}",
+    )
+
+    return {"status": "success", "message": f"Successfully unlinked from {unlinked_from}."}
+
+
+# ─── Remove Athlete from Roster (Coach / Physio removal) ───────────
+
+@router.post("/{athlete_user_id}/unlink", response_model=dict)
+def remove_athlete_from_roster(
+    athlete_user_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Allows a Coach or Physiotherapist to remove an athlete from their roster."""
+    role_name = current_user.role.name if current_user.role else ""
+    if role_name not in ["coach", "physiotherapist", "admin"]:
+        raise HTTPException(status_code=403, detail="Only coaches, physiotherapists, or admins can remove athletes.")
+
+    athlete_user = db.query(User).filter(User.id == athlete_user_id).first()
+    if not athlete_user or not athlete_user.athlete_profile:
+        raise HTTPException(status_code=404, detail="Athlete not found.")
+
+    profile = athlete_user.athlete_profile
+    pro_name = f"{current_user.first_name} {current_user.last_name}"
+    athlete_name = f"{athlete_user.first_name} {athlete_user.last_name}"
+
+    from app.models.notification import Notification
+    # Purge any remaining notifications from this athlete to this professional
+    db.query(Notification).filter(
+        Notification.recipient_id == current_user.id,
+        Notification.athlete_id == athlete_user_id
+    ).delete()
+
+    if role_name == "coach":
+        if str(profile.linked_coach_id) != str(current_user.id):
+            raise HTTPException(status_code=403, detail="Athlete is not linked to your coach account.")
+        profile.linked_coach_id = None
+    elif role_name == "physiotherapist":
+        if str(profile.linked_physio_id) != str(current_user.id):
+            raise HTTPException(status_code=403, detail="Athlete is not linked to your physiotherapist account.")
+        profile.linked_physio_id = None
+    elif role_name == "admin":
+        profile.linked_coach_id = None
+        profile.linked_physio_id = None
+
+    db.commit()
+
+    # Log user_unlinked audit event
+    from app.core.activity_logger import log_activity
+    log_activity(
+        event="user_unlinked",
+        user_name=pro_name,
+        user_email=current_user.email,
+        user_role=role_name,
+        details=f"{role_name.capitalize()} {pro_name} removed Athlete {athlete_name} from their roster",
+    )
+
+    return {"status": "success", "message": f"Athlete {athlete_name} has been removed from your roster."}
 
 
 # ─── Injury History ────────────────────────────────────────────────

@@ -82,6 +82,18 @@ export const authApi = {
     
   deleteAccount: () =>
     request<void>("/api/auth/me", { method: "DELETE" }),
+
+  forgotPassword: (email: string) =>
+    request<{ message: string }>("/api/auth/forgot-password", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }),
+
+  resetPassword: (token: string, newPassword: string) =>
+    request<{ message: string }>("/api/auth/reset-password", {
+      method: "POST",
+      body: JSON.stringify({ token, new_password: newPassword }),
+    }),
 };
 
 // ─── Athlete Profile API ──────────────────────────────────────────
@@ -118,6 +130,17 @@ export const athleteApi = {
 
   getAthleteInjuries: (userId: string) => 
     request<InjuryRecord[]>(`/api/athletes/${userId}/injuries`),
+
+  unlinkProfessional: (professional_type: "coach" | "physiotherapist") =>
+    request<{ status: string; message: string }>("/api/athletes/unlink", {
+      method: "POST",
+      body: JSON.stringify({ professional_type }),
+    }),
+
+  removeAthleteFromRoster: (athleteUserId: string) =>
+    request<{ status: string; message: string }>(`/api/athletes/${athleteUserId}/unlink`, {
+      method: "POST",
+    }),
 };
 
 
@@ -277,6 +300,56 @@ export const videoApi = {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     }).then(() => undefined).catch(() => undefined);
   },
+
+  deleteAnalysis: (sessionId: string): Promise<{ message: string }> =>
+    request<{ message: string }>(`/api/video/${sessionId}`, { method: "DELETE" }),
+
+  downloadReportPdf: async (sessionId: string, athleteName?: string): Promise<void> => {
+    const token = getToken();
+    const res = await fetch(`${BASE_URL}/api/video/${sessionId}/report/pdf`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: "Failed to download PDF report" }));
+      throw new Error(err.detail || "Failed to download PDF report");
+    }
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `SportGuard_Report_${athleteName || "Session"}_${sessionId.slice(0, 8)}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+  },
+
+  previewReportPdf: async (sessionId: string): Promise<void> => {
+    const token = getToken();
+    const res = await fetch(`${BASE_URL}/api/video/${sessionId}/report/pdf`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: "Failed to load PDF report" }));
+      throw new Error(err.detail || "Failed to load PDF report");
+    }
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    window.open(url, "_blank");
+  },
+
+  getReportPdfBlob: async (sessionId: string): Promise<string> => {
+    const token = getToken();
+    const res = await fetch(`${BASE_URL}/api/video/${sessionId}/report/pdf`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: "Failed to generate PDF report" }));
+      throw new Error(err.detail || "Failed to generate PDF report");
+    }
+    const blob = await res.blob();
+    return window.URL.createObjectURL(blob);
+  },
 };
 
 export interface AthleteProfile {
@@ -292,6 +365,8 @@ export interface AthleteProfile {
   dominant_limb: string | null;
   linked_coach_id: string | null;
   linked_physio_id: string | null;
+  linked_coach?: { id: string; first_name: string; last_name: string; email: string } | null;
+  linked_physio?: { id: string; first_name: string; last_name: string; email: string } | null;
   created_at: string;
   updated_at: string;
 }
@@ -337,4 +412,29 @@ export const chatApi = {
       method: "POST",
       body: JSON.stringify({ message, role }),
     }),
+};
+
+// ─── Notifications API (for Coach & Physio alerts) ─────────────────────────
+export interface NotificationItem {
+  id: string;
+  recipient_id: string;
+  athlete_id: string;
+  athlete_name: string;
+  session_id: string;
+  risk_level: string;
+  sport_type: string | null;
+  message: string;
+  is_read: boolean;
+  created_at: string;
+}
+
+export const notificationApi = {
+  getNotifications: (): Promise<NotificationItem[]> =>
+    request<NotificationItem[]>("/api/notifications"),
+
+  dismissNotification: (id: string): Promise<void> =>
+    request<void>(`/api/notifications/${id}`, { method: "DELETE" }),
+
+  clearAll: (): Promise<void> =>
+    request<void>("/api/notifications", { method: "DELETE" }),
 };

@@ -13,8 +13,19 @@ class Settings(BaseSettings):
     # App
     APP_ENV: str = "development"
 
-    # Gemini AI
+    # Gemini AI (legacy)
     GEMINI_API_KEY: Optional[str] = None
+
+    # Groq AI
+    GROQ_API_KEY: Optional[str] = None
+
+    # SMTP Email Configuration
+    SMTP_HOST: str = "smtp.gmail.com"
+    SMTP_PORT: int = 587
+    SMTP_USERNAME: Optional[str] = None
+    SMTP_PASSWORD: Optional[str] = None
+    SMTP_FROM: Optional[str] = None
+    SMTP_FROM_NAME: str = "SportGuard Support"
 
     class Config:
         env_file = ".env"

@@ -84,6 +84,16 @@ class AthleteProfileCreate(BaseModel):
     dominant_limb: Optional[DominantLimbEnum] = Field(None, example="RIGHT")
 
 
+class ProfessionalSummary(BaseModel):
+    id: UUID
+    first_name: str
+    last_name: str
+    email: str
+
+    class Config:
+        from_attributes = True
+
+
 class AthleteProfileResponse(BaseModel):
     """Schema for returning an athlete profile."""
     id: UUID
@@ -98,6 +108,8 @@ class AthleteProfileResponse(BaseModel):
     dominant_limb: Optional[str] = None
     linked_coach_id: Optional[UUID] = None
     linked_physio_id: Optional[UUID] = None
+    linked_coach: Optional[ProfessionalSummary] = None
+    linked_physio: Optional[ProfessionalSummary] = None
     created_at: datetime
     updated_at: datetime
 
@@ -107,6 +119,11 @@ class AthleteProfileResponse(BaseModel):
 class AthleteLinkRequest(BaseModel):
     """Schema for linking to a professional using an invite code."""
     invite_code: str
+
+
+class AthleteUnlinkRequest(BaseModel):
+    """Schema for athlete unlinking a coach or physiotherapist."""
+    professional_type: str = Field(..., example="coach", description="'coach' or 'physiotherapist'")
 
 
 # ─── Injury History Schemas ───────────────────────────────────────

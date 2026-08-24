@@ -5,8 +5,10 @@ Run this once after starting the database:
 """
 from app.core.database import SessionLocal, engine, Base
 from app.models.user import Role
-from app.models import athlete  # noqa: F401 — must import to register AthleteProfile relationship
+from app.models import athlete       # noqa: F401 — registers AthleteProfile relationship
 from app.models import user as user_models  # noqa: F401
+from app.models import video_analysis       # noqa: F401 — registers VideoAnalysis relationship
+from app.models import system_config        # noqa: F401 — registers SystemConfig table
 
 
 def seed_roles():

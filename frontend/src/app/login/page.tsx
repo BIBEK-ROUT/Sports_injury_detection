@@ -133,7 +133,12 @@ export default function LoginPage() {
             </div>
 
             <div>
-              <label className="sg-label" htmlFor="password">Password</label>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <label className="sg-label" htmlFor="password">Password</label>
+                <Link href="/forgot-password" style={{ color: "#2563eb", fontSize: "13px", fontWeight: 500, textDecoration: "none", marginBottom: "6px" }}>
+                  Forgot password?
+                </Link>
+              </div>
               <input
                 id="password"
                 type="password"

@@ -20,19 +20,24 @@ import uuid
 import shutil
 import logging
 from pathlib import Path
+from datetime import datetime, date
 
 logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, BackgroundTasks
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.api.routes.auth import get_current_user
+from app.models.user import User
 from app.models.video_analysis import VideoAnalysis
 from app.models.athlete import AthleteProfile
+from app.models.notification import Notification
 from app.ml.pose_estimation.service import process_video, VideoAnalysisResult
 from app.ml.inference import predict_injury_risk
 from app.ml.ai_service import generate_static_recommendation
+from app.services.pdf_service import generate_athlete_report_pdf
 
 router = APIRouter(prefix="/api/video", tags=["Video Analysis"])
 
@@ -121,6 +126,20 @@ async def analyze_video(
     - Accepts: MP4, MOV, AVI, MKV, WEBM
     - Returns: JSON with detection stats, biomechanics metrics, risk flags, and image URLs
     """
+    # ── Daily quota check (5 videos per user per day) ──────────────────────
+    today_start = datetime.combine(date.today(), datetime.min.time())
+    videos_today = db.query(VideoAnalysis).filter(
+        VideoAnalysis.user_id == str(current_user.id),
+        VideoAnalysis.created_at >= today_start,
+    ).count()
+    DAILY_VIDEO_LIMIT = 5
+    if videos_today >= DAILY_VIDEO_LIMIT:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Daily video analysis limit reached ({videos_today}/{DAILY_VIDEO_LIMIT}). "
+                   f"Please try again tomorrow to ensure fair platform usage for all users."
+        )
+
     # Validate file extension
     file_ext = Path(file.filename).suffix.lower()
     if file_ext not in ALLOWED_EXTENSIONS:
@@ -179,11 +198,18 @@ async def analyze_video(
     sport_type = athlete_profile.sport_type if athlete_profile else "OTHER"
 
     # ── Run XGBoost Inference ─────────────────────────────────────────
-    # Derive binary flags from frame counts (1 if any frame triggered it)
-    flag_knee_hyperext = 1 if result.frames_knee_hyperextension > 0 else 0
-    flag_knee_valgus   = 1 if result.frames_knee_valgus > 0 else 0
-    flag_trunk_lean    = 1 if result.frames_excessive_trunk_lean > 0 else 0
-    flag_low_symmetry  = 1 if result.frames_low_symmetry > 0 else 0
+    # Use PERCENTAGE thresholds, not "any single frame".
+    # One blurry/transitional frame must NOT trigger a permanent HIGH risk label.
+    _pose_frames = max(result.frames_with_pose, 1)  # avoid division by zero
+
+    # Hyperextension: serious structural risk -> flag if >10% of frames show it
+    flag_knee_hyperext = 1 if (result.frames_knee_hyperextension / _pose_frames) > 0.10 else 0
+    # Knee valgus (inward collapse): flag if >15% of frames show it
+    flag_knee_valgus   = 1 if (result.frames_knee_valgus / _pose_frames) > 0.15 else 0
+    # Trunk lean: flag if >20% of frames show sustained excessive lean
+    flag_trunk_lean    = 1 if (result.frames_excessive_trunk_lean / _pose_frames) > 0.20 else 0
+    # Low symmetry: flag if >25% of frames (dynamic movement is naturally asymmetric)
+    flag_low_symmetry  = 1 if (result.frames_low_symmetry / _pose_frames) > 0.25 else 0
 
     prediction = predict_injury_risk(
         sport_type=sport_type,
@@ -253,6 +279,49 @@ async def analyze_video(
     db.add(analysis)
     db.commit()
     db.refresh(analysis)
+
+    # ── Log Video Upload Activity ──────────────────────────────────────
+    from app.core.activity_logger import log_activity
+    log_activity(
+        event="video_uploaded",
+        user_name=f"{current_user.first_name} {current_user.last_name}",
+        user_email=current_user.email,
+        user_role=current_user.role.name if current_user.role else "athlete",
+        details=f"Analyzed {file.filename} ({sport_type}) — Risk: {risk_level.upper()}",
+        filename=file.filename,
+        session_id=session_id,
+        risk_level=risk_level.lower(),
+        duration_seconds=result.duration_seconds,
+    )
+
+    # ── Notification Alert Trigger for High / Critical Risk ────────────
+    if risk_level.lower() in ["high", "critical"]:
+        try:
+            profile = db.query(AthleteProfile).filter(AthleteProfile.user_id == current_user.id).first()
+            if profile:
+                athlete_full_name = f"{current_user.first_name} {current_user.last_name}"
+                recipients = []
+                if profile.linked_coach_id:
+                    recipients.append(profile.linked_coach_id)
+                if profile.linked_physio_id:
+                    recipients.append(profile.linked_physio_id)
+
+                for r_id in set(recipients):
+                    notif = Notification(
+                        recipient_id=r_id,
+                        athlete_id=current_user.id,
+                        athlete_name=athlete_full_name,
+                        session_id=session_id,
+                        risk_level=risk_level.lower(),
+                        sport_type=sport_type,
+                        message=f"{athlete_full_name} was flagged with {risk_level.upper()} injury risk in their latest {sport_type} analysis.",
+                    )
+                    db.add(notif)
+                if recipients:
+                    db.commit()
+                    logger.info(f"Created high-risk notifications for session {session_id} to recipients: {recipients}")
+        except Exception as e:
+            logger.warning(f"Failed to generate notifications for session {session_id}: {e}")
 
     # ── Schedule Gemini as background task (runs AFTER response is sent) ──
     if background_tasks is not None:
@@ -409,6 +478,14 @@ def get_athlete_history(
     if not target:
         raise HTTPException(status_code=404, detail="Athlete not found.")
 
+    # Enforce linkage check for coaches and physiotherapists
+    if current_user.role.name == "coach":
+        if not target.athlete_profile or str(target.athlete_profile.linked_coach_id) != str(current_user.id):
+            raise HTTPException(status_code=403, detail="You are no longer linked to this athlete.")
+    elif current_user.role.name == "physiotherapist":
+        if not target.athlete_profile or str(target.athlete_profile.linked_physio_id) != str(current_user.id):
+            raise HTTPException(status_code=403, detail="You are no longer linked to this athlete.")
+
     analyses = (
         db.query(VideoAnalysis)
         .filter(VideoAnalysis.user_id == user_id)
@@ -460,6 +537,7 @@ def get_athlete_history(
 
 
 
+
 @router.delete(
     "/{session_id}/skeleton-video",
     summary="Delete the temporary skeleton video for a session",
@@ -483,3 +561,161 @@ def delete_skeleton_video(
 
     # Return 204 No Content whether the file existed or not
     return
+
+
+# ── In-memory deletion event log (shown in Admin Activity Monitor) ────────────
+# Each entry: {user_name, user_email, user_role, filename, deleted_at}
+_deletion_log: list = []
+
+def get_deletion_log() -> list:
+    """Returns the most recent 100 deletion events."""
+    return _deletion_log[-100:]
+
+
+@router.delete(
+    "/{session_id}",
+    summary="Permanently delete an analysis record",
+    status_code=200,
+)
+def delete_analysis(
+    session_id: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """
+    Allows an athlete to permanently delete one of their own analysis records.
+    - Only the owner of the record can delete it (ownership enforced).
+    - Removes the DB row, all uploaded video files, and pose output files.
+    - Logs a deletion event to the in-memory activity log for the Admin Monitor.
+    """
+    # Fetch the analysis record
+    analysis = db.query(VideoAnalysis).filter(
+        VideoAnalysis.session_id == session_id
+    ).first()
+
+    if not analysis:
+        raise HTTPException(status_code=404, detail="Analysis record not found.")
+
+    # Ownership check — only the owner can delete their record
+    if str(analysis.user_id) != str(current_user.id):
+        raise HTTPException(
+            status_code=403,
+            detail="You can only delete your own analysis records."
+        )
+
+    filename = analysis.original_filename or "unknown"
+
+    # ── Log the deletion for the Admin Activity Monitor ────────────────────────
+    from app.core.activity_logger import log_activity
+    log_activity(
+        event="video_deleted",
+        user_name=f"{current_user.first_name} {current_user.last_name}",
+        user_email=current_user.email,
+        user_role=current_user.role.name if current_user.role else "unknown",
+        details=f"Permanently deleted session for {filename}",
+        filename=filename,
+        session_id=session_id,
+    )
+
+    # ── Delete files from disk ─────────────────────────────────────────────────
+    # 1. Uploaded source video
+    for ext in ALLOWED_EXTENSIONS:
+        candidate = UPLOAD_DIR / f"{session_id}{ext}"
+        if candidate.exists():
+            candidate.unlink()
+
+    # 2. Pose output folder (skeleton video + annotated frame images)
+    session_out_dir = OUTPUT_DIR / session_id
+    if session_out_dir.exists():
+        shutil.rmtree(session_out_dir, ignore_errors=True)
+
+    # ── Delete the DB record ───────────────────────────────────────────────────
+    db.delete(analysis)
+    db.commit()
+
+    return {"message": f"Analysis '{filename}' has been permanently deleted."}
+
+
+# ─── PDF Report Export Endpoint ─────────────────────────────────────────────
+
+@router.get(
+    "/{session_id}/report/pdf",
+    summary="Download 2-Page Clinical & Biomechanical PDF Assessment Report",
+)
+def download_pdf_report(
+    session_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Generates and streams a 2-page Clinical & Biomechanical Assessment PDF Report.
+    Permissions:
+    - Athlete: Can download for their own sessions.
+    - Coach / Physio: Can download for athletes linked to them.
+    - Scientist / Admin: Can download for any session.
+    """
+    analysis = db.query(VideoAnalysis).filter(VideoAnalysis.session_id == session_id).first()
+    if not analysis:
+        raise HTTPException(status_code=404, detail="Analysis session not found.")
+
+    athlete_user = db.query(User).filter(User.id == analysis.user_id).first()
+    if not athlete_user:
+        raise HTTPException(status_code=404, detail="Athlete user not found.")
+
+    role_name = current_user.role.name if current_user.role else "athlete"
+
+    # RBAC Check
+    if role_name == "athlete" and str(current_user.id) != str(analysis.user_id):
+        raise HTTPException(status_code=403, detail="You can only export reports for your own sessions.")
+    elif role_name in ["coach", "physiotherapist"]:
+        # Verify athlete is linked to this coach or physio
+        profile = db.query(AthleteProfile).filter(AthleteProfile.user_id == analysis.user_id).first()
+        if not profile or (str(profile.linked_coach_id) != str(current_user.id) and str(profile.linked_physio_id) != str(current_user.id)):
+            raise HTTPException(status_code=403, detail="You do not have access to this athlete's report.")
+
+    # Fetch athlete profile (for physical stats and past injury history)
+    athlete_profile = db.query(AthleteProfile).filter(AthleteProfile.user_id == analysis.user_id).first()
+
+    # Fetch historical sessions up to and including THIS session for progression trend
+    history_records = (
+        db.query(VideoAnalysis)
+        .filter(
+            VideoAnalysis.user_id == analysis.user_id,
+            VideoAnalysis.created_at <= analysis.created_at
+        )
+        .order_by(VideoAnalysis.created_at.asc())
+        .all()
+    )
+
+    # Log PDF report export event
+    from app.core.activity_logger import log_activity
+    viewer_title = role_name.capitalize()
+    athlete_full_name = f"{athlete_user.first_name} {athlete_user.last_name}"
+    log_activity(
+        event="report_exported",
+        user_name=f"{current_user.first_name} {current_user.last_name}",
+        user_email=current_user.email,
+        user_role=role_name,
+        details=f"{viewer_title} exported 2-page PDF report for {athlete_full_name}",
+        filename=analysis.original_filename or f"Report_{session_id[:8]}",
+        session_id=session_id,
+        risk_level=analysis.risk_level,
+    )
+
+    pdf_buffer = generate_athlete_report_pdf(
+        analysis=analysis,
+        athlete_user=athlete_user,
+        athlete_profile=athlete_profile,
+        history_records=history_records,
+    )
+
+    filename = f"SportGuard_Report_{athlete_user.last_name or 'Athlete'}_{session_id[:8]}.pdf"
+    
+    return StreamingResponse(
+        pdf_buffer,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename=\"{filename}\"",
+            "Cache-Control": "no-cache",
+        }
+    )

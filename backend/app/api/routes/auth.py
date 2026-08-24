@@ -2,9 +2,16 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.core.security import hash_password, verify_password, create_access_token, decode_access_token
+from app.core.security import (
+    hash_password, verify_password, create_access_token, decode_access_token,
+    create_password_reset_token, decode_password_reset_token
+)
 from app.models.user import User, Role
-from app.schemas.user import UserCreate, UserResponse, Token
+from app.models.system_config import SystemConfig
+from app.schemas.user import (
+    UserCreate, UserResponse, Token, ForgotPasswordRequest, ResetPasswordRequest
+)
+from app.core.email import send_smtp_email, get_reset_email_template
 import secrets
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
@@ -17,6 +24,14 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 def register(user_data: UserCreate, db: Session = Depends(get_db)):
     """Register a new user account."""
+
+    # Check if new registrations are allowed by the Admin
+    reg_config = db.query(SystemConfig).filter(SystemConfig.key == "allow_new_registrations").first()
+    if reg_config and reg_config.value == "false":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="New account registrations are currently closed by the platform administrator. Please try again later."
+        )
 
     # Check if email already exists
     existing = db.query(User).filter(User.email == user_data.email).first()
@@ -32,6 +47,13 @@ def register(user_data: UserCreate, db: Session = Depends(get_db)):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid role selected."
+        )
+
+    # Block anyone from self-registering as Admin — admins are created via the backend script only
+    if role.name == "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Administrator accounts cannot be created through this endpoint."
         )
 
     # Generate invite code for professionals
@@ -52,6 +74,17 @@ def register(user_data: UserCreate, db: Session = Depends(get_db)):
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
+
+    # Log new user registration audit event
+    from app.core.activity_logger import log_activity
+    log_activity(
+        event="user_registered",
+        user_name=f"{new_user.first_name} {new_user.last_name}",
+        user_email=new_user.email,
+        user_role=role.name,
+        details=f"New {role.name.capitalize()} account created",
+    )
+
     return new_user
 
 
@@ -71,7 +104,7 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="This account has been deactivated."
+            detail="This account has been deactivated. Please contact support at sportguardsupport@gmail.com for assistance."
         )
 
     access_token = create_access_token(data={"sub": str(user.id)})
@@ -131,3 +164,88 @@ def delete_me(db: Session = Depends(get_db), current_user: User = Depends(get_cu
     db.commit()
     
     return None
+
+
+# ─── Forgot Password ──────────────────────────────────────────
+
+@router.post("/forgot-password", status_code=status.HTTP_200_OK)
+def forgot_password(data: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    """
+    Step 1: Request password reset email.
+    Generates a secure 15-minute token and emails it to the user.
+    """
+    user = db.query(User).filter(User.email.ilike(data.email)).first()
+    if not user:
+        # Standard security practice: do not leak whether an email exists or not.
+        # Still return a success message.
+        return {"message": "If this email is registered, a password reset link has been sent."}
+
+    # Generate secure 15-min token
+    token = create_password_reset_token(user.email, user.hashed_password)
+
+    # Build reset URL (points to our React/Next.js frontend)
+    # Typically this would read from configuration, but for local/demo we use localhost:3000
+    reset_url = f"http://localhost:3000/reset-password?token={token}"
+
+    # Prepare email content
+    subject = "Reset Your SportGuard Password"
+    html_content = get_reset_email_template(reset_url, user.first_name)
+    text_content = (
+        f"Hello {user.first_name},\n\n"
+        "We received a request to reset the password for your SportGuard account. "
+        f"Click the link below or copy it to your browser to set a new password:\n{reset_url}\n\n"
+        "This link will expire in 15 minutes. If you did not make this request, you can safely ignore this email."
+    )
+
+    # Send email
+    send_smtp_email(
+        to_email=user.email,
+        subject=subject,
+        html_content=html_content,
+        text_content=text_content
+    )
+
+    return {"message": "If this email is registered, a password reset link has been sent."}
+
+
+# ─── Reset Password ───────────────────────────────────────────
+
+@router.post("/reset-password", status_code=status.HTTP_200_OK)
+def reset_password(data: ResetPasswordRequest, db: Session = Depends(get_db)):
+    """
+    Step 2: Submit new password using the token.
+    Decodes the token, checks signature against current password hash, and updates it.
+    """
+    payload = decode_password_reset_token(data.token)
+    if not payload or not payload.get("sub") or not payload.get("pwh"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The password reset link is invalid or has expired. Please request a new one."
+        )
+
+    email = payload.get("sub")
+    pwh_token = payload.get("pwh")
+
+    # Fetch user
+    user = db.query(User).filter(User.email.ilike(email)).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The password reset link is invalid or has expired."
+        )
+
+    # Check if the token has already been used.
+    # The token payload contains the last 10 characters of the hashed_password.
+    # If the user has already reset their password, the current hash will be different,
+    # and this check will fail, preventing reuse of the same link!
+    if user.hashed_password[-10:] != pwh_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This password reset link has already been used. Please request a new one."
+        )
+
+    # Hash and update new password
+    user.hashed_password = hash_password(data.new_password)
+    db.commit()
+
+    return {"message": "Your password has been successfully reset. You can now login with your new password."}

@@ -37,40 +37,49 @@ from app.ml.pose_estimation.engine import JointCoordinates
 # They will be passed to XGBoost in Milestone 3 as binary risk features.
 
 RISK_THRESHOLDS = {
-    # Knee: full extension is ~180°. Hyperextension (>185°) or sharp flexion
-    # in a load-bearing position (<90°) are both ACL/meniscus risk signals.
-    "knee_angle_min": 90.0,   # Below this under load → ACL stress
-    "knee_angle_max": 175.0,  # Above this → hyperextension risk
+    # Knee: full extension is ~180°.
+    # Hyperextension (>185°) is dangerous. Sharp acute flexion under load is risky.
+    # Normal sprint/running gait dips to 70-85°. Only flag EXTREME flexion (<65°).
+    # At 65° or below the knee is under severe compressive load — genuine ACL risk.
+    "knee_angle_min": 65.0,   # Below 65° under load → genuine ACL stress
+    "knee_angle_max": 176.0,  # Above 176° → hyperextension risk
 
-    # Hip: very low hip angle during activity indicates poor mechanics
-    "hip_angle_min": 70.0,
+    # Hip: very low hip angle during activity indicates poor mechanics.
+    # Lowered from 70° — a sprinting athlete's hip regularly drops to 75-80°.
+    "hip_angle_min": 60.0,
 
-    # Elbow: hyperextension risk for throwing athletes
-    "elbow_angle_max": 175.0,
+    # Elbow: hyperextension risk for throwing athletes.
+    "elbow_angle_max": 176.0,
 
-    # Trunk lean: >25° forward lean is a lower-back stress indicator
-    "trunk_lean_max": 25.0,
+    # Trunk lean: >38° sustained forward lean is a lower-back stress indicator.
+    # Normal sprinting: 30-45° transient lean. Sustained lean over 38° is a concern.
+    # Old value of 25° flagged EVERY sprint frame — far too strict.
+    "trunk_lean_max": 38.0,
 
     # Wrist angle: used as risk threshold upper bound (boxing/wrestling)
     "wrist_angle_min": 140.0,   # Below this = excessive wrist flexion/impact risk
-    # Torso rotation: >30° twist during movement = lower-back stress
-    "torso_rotation_max": 30.0,
-    # Neck angle: >20° head tilt = neck loading risk (boxing, wrestling)
-    "neck_angle_max": 20.0,
+    # Torso rotation: >40° twist during movement = lower-back stress
+    "torso_rotation_max": 40.0,
+    # Neck angle: >25° head tilt = neck loading risk (boxing, wrestling)
+    "neck_angle_max": 25.0,
 
-    # Symmetry: below 0.75 (75%) means one side is compensating for the other
-    "symmetry_min": 0.75,
+    # Symmetry: below 0.65 (65%) means one side is significantly compensating.
+    # During dynamic movement (sprinting, jumping) natural asymmetry is normal.
+    # 0.75 was too strict — flagging normal gait asymmetry as a risk.
+    "symmetry_min": 0.65,
 
     # Knee Valgus (Frontal Plane Projection Angle)
     # Healthy knee ≈ 180° in frontal plane.
-    # < 165° = mild valgus (inward knee collapse) — ACL risk
-    # < 150° = severe valgus — high ACL tear risk
-    "knee_valgus_mild": 165.0,
-    "knee_valgus_severe": 150.0,
+    # < 160° = mild valgus (inward knee collapse) — ACL risk
+    # < 145° = severe valgus — high ACL tear risk
+    # Old mild threshold of 165° was too strict — flagging normal camera angles.
+    "knee_valgus_mild": 160.0,
+    "knee_valgus_severe": 145.0,
 
-    # Balance: lateral offset of CoM from BoS center
-    # > 0.07 = significant instability / poor hip stability
-    "balance_offset_max": 0.07,
+    # Balance: lateral offset of CoM from BoS center.
+    # > 0.15 = significant instability (one-legged landing, hop tests etc.)
+    # Old value of 0.07 was flagging normal single-leg stance phases.
+    "balance_offset_max": 0.15,
 }
 
 

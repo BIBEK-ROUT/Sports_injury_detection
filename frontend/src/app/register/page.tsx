@@ -22,11 +22,20 @@ export default function RegisterPage() {
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [registrationsClosed, setRegistrationsClosed] = useState(false);
+
+  const API = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 
   useEffect(() => {
     if (getToken()) {
       router.replace("/dashboard");
+      return;
     }
+    // Check if registrations are open
+    fetch(`${API}/api/public/config`)
+      .then(r => r.json())
+      .then(cfg => { if (cfg.allow_new_registrations === "false") setRegistrationsClosed(true); })
+      .catch(() => {}); // fail silently — don't block registration if config is unreachable
   }, [router]);
 
   function set(field: string, value: string | number) {
@@ -55,7 +64,39 @@ export default function RegisterPage() {
     }
   }
 
+  if (registrationsClosed) {
+    return (
+      <div style={{
+        minHeight: "100vh", background: "#f8fafc",
+        display: "flex", alignItems: "center", justifyContent: "center", padding: "40px 24px",
+      }}>
+        <div style={{ textAlign: "center", maxWidth: "420px" }}>
+          <div style={{
+            width: 64, height: 64, borderRadius: "16px",
+            background: "linear-gradient(135deg,#f59e0b,#d97706)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            margin: "0 auto 20px",
+          }}>
+            <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+            </svg>
+          </div>
+          <h1 style={{ fontSize: "22px", fontWeight: 800, color: "#0f172a", marginBottom: "10px" }}>Registrations Closed</h1>
+          <p style={{ fontSize: "14px", color: "#64748b", lineHeight: 1.6, marginBottom: "20px" }}>
+            New account creation is temporarily closed by the platform administrator. Please check back later or contact your administrator.
+          </p>
+          <Link href="/login" style={{
+            display: "inline-block", padding: "10px 24px", borderRadius: "8px",
+            background: "#2563eb", color: "#fff", fontSize: "14px", fontWeight: 600,
+            textDecoration: "none",
+          }}>Back to Login</Link>
+        </div>
+      </div>
+    );
+  }
+
   return (
+
     <div style={{
       minHeight: "100vh",
       background: "#f8fafc",

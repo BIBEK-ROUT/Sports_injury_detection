@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { chatApi } from "@/lib/api";
 
 interface GlobalChatbotProps {
@@ -14,6 +14,19 @@ export default function GlobalChatbot({ viewerRole, athleteFirstName, contextTyp
   const [chatMessages, setChatMessages] = useState<{ role: "user" | "ai"; text: string }[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
+  const [chatbotEnabled, setChatbotEnabled] = useState(true);
+
+  const API = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
+
+  useEffect(() => {
+    fetch(`${API}/api/public/config`)
+      .then(r => r.json())
+      .then(cfg => { if (cfg.ai_chatbot_enabled === "false") setChatbotEnabled(false); })
+      .catch(() => {}); // fail silently — keep chatbot visible if config unreachable
+  }, []);
+
+  // If admin has disabled the chatbot, render nothing
+  if (!chatbotEnabled) return null;
 
   const handleOpen = () => {
     setChatOpen(true);

@@ -81,6 +81,36 @@ export default function AnalyzePage() {
   const [stage, setStage] = useState("");
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [analysisInProgress, setAnalysisInProgress] = useState(false);
+  const [inProgressFilename, setInProgressFilename] = useState<string | null>(null);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
+  const [previewingPdf, setPreviewingPdf] = useState(false);
+
+  const handlePreviewPdf = async () => {
+    if (!result?.session_id) return;
+    setPreviewingPdf(true);
+    setError(null);
+    try {
+      await videoApi.previewReportPdf(result.session_id);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to load PDF preview");
+    } finally {
+      setPreviewingPdf(false);
+    }
+  };
+
+  const handleDownloadPdf = async () => {
+    if (!result?.session_id) return;
+    setDownloadingPdf(true);
+    setError(null);
+    try {
+      await videoApi.downloadReportPdf(result.session_id, result.video.filename.split(".")[0]);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to download PDF report");
+    } finally {
+      setDownloadingPdf(false);
+    }
+  };
 
   // Redirect non-athletes away from this page
   useEffect(() => {
@@ -90,13 +120,27 @@ export default function AnalyzePage() {
     }).catch(() => {});
   }, [router]);
 
-  // Restore last result from localStorage when user navigates back
+  // On mount: restore in-progress state OR last finished result from localStorage
   useEffect(() => {
     try {
+      const inProgress = localStorage.getItem(LS_ANALYZING_KEY);
+      if (inProgress) {
+        const parsed = JSON.parse(inProgress);
+        setAnalysisInProgress(true);
+        setInProgressFilename(parsed.filename ?? null);
+        return; // Don't load old result if an analysis is running
+      }
       const saved = localStorage.getItem(LS_KEY);
       if (saved) setResult(JSON.parse(saved));
     } catch { /* ignore */ }
   }, []);
+
+  // When uploading state changes locally (this tab), sync analysisInProgress display
+  useEffect(() => {
+    if (uploading) {
+      setAnalysisInProgress(false); // we're showing the real progress bar here
+    }
+  }, [uploading]);
 
   // Poll for AI recommendations if they are missing
   useEffect(() => {
@@ -119,6 +163,24 @@ export default function AnalyzePage() {
       return () => clearInterval(interval);
     }
   }, [result]);
+
+  // Listen for analysis completing in the background (other tab / same session)
+  // so that when result lands in LS_KEY the "in-progress" screen auto-refreshes
+  useEffect(() => {
+    if (!analysisInProgress) return;
+    const id = setInterval(() => {
+      const stillRunning = localStorage.getItem(LS_ANALYZING_KEY);
+      if (!stillRunning) {
+        // Analysis finished — reload the page cleanly to show results
+        setAnalysisInProgress(false);
+        try {
+          const saved = localStorage.getItem(LS_KEY);
+          if (saved) setResult(JSON.parse(saved));
+        } catch { /* ignore */ }
+      }
+    }, 2000);
+    return () => clearInterval(id);
+  }, [analysisInProgress]);
 
 
   const handleFile = (f: File) => {
@@ -174,6 +236,11 @@ export default function AnalyzePage() {
     }
   };
 
+  // ── Derived: is the page locked from interaction? ──────────────────────────
+  // True when the actual upload is running in THIS tab, OR when the user
+  // navigated away and came back while an upload is still running.
+  const isLocked = uploading || analysisInProgress;
+
   const risk = result ? RISK_CONFIG[result.risk_level] ?? RISK_CONFIG.low : null;
 
   return (
@@ -187,25 +254,62 @@ export default function AnalyzePage() {
         </p>
       </div>
 
+      {/* ── Analysis In-Progress Screen (navigated-away-and-back case) ── */}
+      {!result && analysisInProgress && (
+        <div style={{
+          border: "2px solid #bfdbfe",
+          borderRadius: "16px",
+          background: "#eff6ff",
+          padding: "48px 32px",
+          textAlign: "center",
+          marginBottom: "24px",
+        }}>
+          <div style={{
+            width: "56px", height: "56px", borderRadius: "50%",
+            background: "linear-gradient(135deg, #2563eb, #7c3aed)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            margin: "0 auto 16px",
+            animation: "spin 1.2s linear infinite",
+          }}>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+            </svg>
+          </div>
+          <p style={{ fontSize: "17px", fontWeight: 700, color: "#1e40af", marginBottom: "6px" }}>Analysis Running…</p>
+          {inProgressFilename && (
+            <p style={{ fontSize: "13px", color: "#3b82f6", marginBottom: "6px" }}>📁 {inProgressFilename}</p>
+          )}
+          <p style={{ fontSize: "13px", color: "#64748b", lineHeight: 1.5 }}>
+            Your video is being processed in the background.<br/>
+            You can stay on this screen or navigate away — the results will appear here automatically when finished.
+          </p>
+          <p style={{ fontSize: "12px", color: "#94a3b8", marginTop: "12px" }}>Do not upload another video until this one is complete.</p>
+        </div>
+      )}
+
       {/* ── Upload Zone ── */}
-      {!result && (
+      {!result && !analysisInProgress && (
         <div style={{
           border: `2px dashed ${dragging ? "#2563eb" : file ? "#16a34a" : "#cbd5e1"}`,
           borderRadius: "16px",
           background: dragging ? "#eff6ff" : file ? "#f0fdf4" : "#fafafa",
           padding: "48px 32px",
           textAlign: "center",
-          cursor: "pointer",
+          cursor: isLocked ? "not-allowed" : "pointer",
           transition: "all 0.2s",
           marginBottom: "24px",
+          opacity: isLocked ? 0.6 : 1,
+          pointerEvents: isLocked ? "none" : "auto",
         }}
-          onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+          onDragOver={(e) => { e.preventDefault(); if (!isLocked) setDragging(true); }}
           onDragLeave={() => setDragging(false)}
           onDrop={onDrop}
-          onClick={() => !uploading && fileInputRef.current?.click()}
+          onClick={() => !isLocked && fileInputRef.current?.click()}
         >
+          {/* Input is always disabled while locked to prevent OS file picker from opening */}
           <input ref={fileInputRef} type="file" accept="video/*" style={{ display: "none" }}
-            onChange={e => e.target.files?.[0] && handleFile(e.target.files[0])} />
+            disabled={isLocked}
+            onChange={e => !isLocked && e.target.files?.[0] && handleFile(e.target.files[0])} />
 
           {file ? (
             <>
@@ -231,7 +335,7 @@ export default function AnalyzePage() {
       )}
 
       {/* ── Upload button / progress ── */}
-      {file && !result && (
+      {file && !result && !analysisInProgress && (
         <div style={{ marginBottom: "28px" }}>
           {uploading ? (
             <div>
@@ -245,16 +349,21 @@ export default function AnalyzePage() {
               <p style={{ fontSize: "12px", color: "#94a3b8", marginTop: "8px" }}>This may take 30–60 seconds for a typical sports video…</p>
             </div>
           ) : (
-            <button id="run-analysis-btn" onClick={runAnalysis} style={{
+            <button id="run-analysis-btn" onClick={runAnalysis} disabled={isLocked} style={{
               width: "100%", padding: "14px", borderRadius: "10px",
-              background: "linear-gradient(135deg, #2563eb, #7c3aed)",
-              color: "#fff", fontSize: "15px", fontWeight: 600,
-              border: "none", cursor: "pointer", fontFamily: "inherit",
-              boxShadow: "0 4px 14px rgba(37,99,235,0.35)",
+              background: isLocked
+                ? "#e2e8f0"
+                : "linear-gradient(135deg, #2563eb, #7c3aed)",
+              color: isLocked ? "#94a3b8" : "#fff",
+              fontSize: "15px", fontWeight: 600,
+              border: "none",
+              cursor: isLocked ? "not-allowed" : "pointer",
+              fontFamily: "inherit",
+              boxShadow: isLocked ? "none" : "0 4px 14px rgba(37,99,235,0.35)",
               transition: "opacity 0.15s",
             }}
-              onMouseEnter={e => (e.currentTarget.style.opacity = "0.9")}
-              onMouseLeave={e => (e.currentTarget.style.opacity = "1")}
+              onMouseEnter={e => { if (!isLocked) e.currentTarget.style.opacity = "0.9"; }}
+              onMouseLeave={e => { if (!isLocked) e.currentTarget.style.opacity = "1"; }}
             >
               🔬 Run Biomechanical Analysis
             </button>
@@ -284,21 +393,71 @@ export default function AnalyzePage() {
                 {result.video.filename} &middot; {result.video.duration_seconds.toFixed(1)}s &middot; {result.video.pose_detection_rate}% pose detection
               </p>
             </div>
-            <button
-              id="analyze-new-btn"
-              onClick={() => {
-                if (result.session_id) videoApi.deleteSkeletonVideo(result.session_id);
-                localStorage.removeItem(LS_KEY);
-                setResult(null);
-                setFile(null);
-              }}
-              style={{
-                marginLeft: "auto", padding: "8px 16px", borderRadius: "8px",
-                background: "transparent", border: `1px solid ${risk.border}`,
-                color: risk.color, fontWeight: 600, fontSize: "13px",
-                cursor: "pointer", fontFamily: "inherit",
-              }}
-            >+ New Video</button>
+            <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+              <button
+                id="preview-pdf-btn"
+                onClick={handlePreviewPdf}
+                disabled={previewingPdf || downloadingPdf}
+                style={{
+                  padding: "8px 14px", borderRadius: "8px",
+                  background: "#ffffff", border: `1px solid ${risk.border}`,
+                  color: "#1e293b", fontWeight: 600, fontSize: "13px",
+                  cursor: (previewingPdf || downloadingPdf) ? "not-allowed" : "pointer", fontFamily: "inherit",
+                  display: "flex", alignItems: "center", gap: "6px",
+                  boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+                  transition: "all 0.15s",
+                  opacity: previewingPdf ? 0.7 : 1,
+                }}
+                onMouseEnter={e => { if (!previewingPdf && !downloadingPdf) (e.currentTarget as HTMLElement).style.background = "#f8fafc"; }}
+                onMouseLeave={e => { if (!previewingPdf && !downloadingPdf) (e.currentTarget as HTMLElement).style.background = "#ffffff"; }}
+              >
+                👁️ {previewingPdf ? "Loading..." : "Preview Report"}
+              </button>
+
+              <button
+                id="download-pdf-btn"
+                onClick={handleDownloadPdf}
+                disabled={downloadingPdf || previewingPdf}
+                style={{
+                  padding: "8px 14px", borderRadius: "8px",
+                  background: "#2563eb", border: "none",
+                  color: "#ffffff", fontWeight: 600, fontSize: "13px",
+                  cursor: (downloadingPdf || previewingPdf) ? "not-allowed" : "pointer", fontFamily: "inherit",
+                  display: "flex", alignItems: "center", gap: "6px",
+                  boxShadow: "0 1px 3px rgba(37,99,235,0.3)",
+                  transition: "all 0.15s",
+                  opacity: downloadingPdf ? 0.7 : 1,
+                }}
+                onMouseEnter={e => { if (!downloadingPdf && !previewingPdf) (e.currentTarget as HTMLElement).style.background = "#1d4ed8"; }}
+                onMouseLeave={e => { if (!downloadingPdf && !previewingPdf) (e.currentTarget as HTMLElement).style.background = "#2563eb"; }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                  <polyline points="7 10 12 15 17 10"/>
+                  <line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+                {downloadingPdf ? "Downloading..." : "Export PDF"}
+              </button>
+
+              <button
+                id="analyze-new-btn"
+                onClick={() => {
+                  if (result.session_id) videoApi.deleteSkeletonVideo(result.session_id);
+                  localStorage.removeItem(LS_KEY);
+                  setResult(null);
+                  setFile(null);
+                }}
+                style={{
+                  padding: "8px 14px", borderRadius: "8px",
+                  background: "transparent", border: `1px solid ${risk.border}`,
+                  color: risk.color, fontWeight: 600, fontSize: "13px",
+                  cursor: "pointer", fontFamily: "inherit",
+                  transition: "all 0.15s",
+                }}
+                onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = "rgba(0,0,0,0.03)"}
+                onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = "transparent"}
+              >+ New Video</button>
+            </div>
           </div>
 
           {/* XGBoost AI Verdict Panel */}
